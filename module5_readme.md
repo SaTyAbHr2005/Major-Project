@@ -110,6 +110,11 @@ config.py provides dataclass-based configuration for:
 - split proportions
 - random seed
 - grouping column
+- existing-split preservation
+- invalid/ambiguous split policy
+- leakage policy
+- optional generation of missing splits from train
+- real group-ID map path
 - image validation rules
 - tabular validation rules
 - imputation
@@ -177,9 +182,59 @@ Labels are mapped into the representation required for downstream processing whi
 
 splitter.py provides deterministic splitting using configurable random seeds.
 
-- Stratified splitting: StratifiedShuffleSplit is used where appropriate to preserve class distributions.
+Before generating a new image split, Module 5 validates whether the hospital already supplied an existing split.
+
+### Existing Image Split Validation Gate
+
+The split-validation layer distinguishes:
+
+- `NO_EXISTING_SPLIT`
+- `VALID_COMPLETE`
+- `VALID_PARTIAL`
+- `AMBIGUOUS`
+- `INVALID`
+
+Validation checks include:
+- split structure
+- split completeness
+- non-empty split requirements
+- class consistency
+- class distribution information
+- exact duplicate leakage across splits
+- real group/patient leakage when a real group-ID map is supplied
+- corrupted/rejected sample accounting
+- discovered versus assigned sample accounting
+
+If an existing split is `VALID_COMPLETE`, Module 5 preserves the exact hospital-provided split assignment.
+
+If an existing split is `VALID_PARTIAL`, the existing assignments are preserved. Missing splits can only be generated from the train split when `generate_missing_splits_from_train` is explicitly enabled.
+
+If an existing split is `INVALID` or `AMBIGUOUS`, the default behavior is to stop with an error. Regeneration requires explicit configuration through `invalid_split_policy`.
+
+Mixed or ambiguous directory layouts are not silently re-split.
+
+If no existing split is detected, normal deterministic generation is performed.
+
+### Leakage Policy
+
+Leakage is always reported. `SplitConfig.leakage_policy` supports:
+
+- `invalid` — default; detected duplicate/group leakage makes the existing split invalid.
+- `warning` — preserves the existing split while recording a visible leakage finding.
+
+### Grouped Splitting
+
+`GroupShuffleSplit` is supported only when real group identifiers are supplied through the configured `group_id_map_path`.
+
+Fabricated group identifiers are not used for leakage claims or grouped splitting.
+
+If grouped splitting is explicitly requested without a real, complete group-ID map, the operation fails rather than inventing group membership.
+
+### Standard Splitting
+
+- Stratified splitting: `StratifiedShuffleSplit` is used where appropriate to preserve class distributions.
 - Fallback: If stratification is mathematically impossible, the splitter can fall back to random splitting instead of unnecessarily failing the complete preprocessing operation.
-- Grouped splitting: GroupShuffleSplit is supported when a grouping identifier such as Patient ID is available. This prevents samples belonging to the same group from being distributed across incompatible dataset boundaries.
+- Grouped splitting: `GroupShuffleSplit` is supported with real group identifiers to prevent samples from the same group from being distributed across incompatible dataset boundaries.
 
 ## 11. Class Balancing
 
@@ -368,6 +423,12 @@ python -m hospital_client.preprocessing preprocess \
     --mode <lazy|materialized>
 ```
 
+For explicit split-validation behavior, the CLI also supports configuration for:
+- existing-split preservation
+- invalid/ambiguous split policy
+- leakage policy
+- real group-ID mapping where grouped splitting is required
+
 Example:
 ```bash
 python -m hospital_client.preprocessing preprocess \
@@ -445,6 +506,13 @@ The Module 5 test suite covers both normal and edge-case behavior, including:
 - stratified splitting
 - random fallback splitting
 - grouped splitting
+- existing image-split validation
+- valid complete and partial split handling
+- ambiguous and invalid split handling
+- duplicate leakage detection
+- group/patient leakage handling with real group identifiers
+- configurable leakage policy
+- explicit missing-split generation from train
 - class balancing
 - imputation strategies
 - categorical encoding
@@ -457,26 +525,28 @@ The Module 5 test suite covers both normal and edge-case behavior, including:
 - preprocessing edge cases
 
 Verified test state:
-Total tests:        62
-Passed:             62
-Failed:              0
-Pass rate:         100%
-Preprocessing coverage: 94%
+Module 5 tests:            84
+Passed:                     84
+Failed:                      0
+Pass rate:                100%
+Preprocessing coverage:    97%
 
-The suite contains:
-- Module 4 regression tests: 21
-- Module 5 tests:            41
-- Total:                     62
+Module 4 regression tests:
+- 21 passed
 
-Module 4 regression tests remained stable during Module 5 verification.
+Full hospital_client verification:
+- 249 passed
+- 0 failed
+
+Module 5 verification includes the completed split-validation behavior and regression protection for Module 4.
 
 ## 25. Coverage
 
-The current Module 5 test suite achieves 94% line coverage.
+The current Module 5 preprocessing implementation achieves 97% measured line coverage.
 
 Coverage is a measurement of executable code exercised by automated tests. It is not a percentage of correctness.
 
-The increase from the earlier 82% was achieved by adding meaningful tests for previously uncovered behavior and edge cases without changing production logic merely to increase the coverage number.
+The coverage includes the implemented split-validation, leakage-policy, partial-split, grouped-splitting, output, and edge-case behavior.
 
 ## 26. Verification Status
 
@@ -488,6 +558,13 @@ The increase from the earlier 82% was achieved by adding meaningful tests for pr
 | Tabular quality validation | Complete |
 | Quarantine management | Complete |
 | Label hierarchy | Complete |
+| Existing image-split validation gate | Complete |
+| Valid complete split preservation | Complete |
+| Valid partial split handling | Complete |
+| Invalid/ambiguous split policy | Complete |
+| Duplicate leakage detection | Complete |
+| Configurable leakage policy | Complete |
+| Real group-ID validation | Complete |
 | Stratified splitting | Complete |
 | Grouped splitting | Complete |
 | Class balancing | Complete |
@@ -501,8 +578,9 @@ The increase from the earlier 82% was achieved by adding meaningful tests for pr
 | Reporting | Complete |
 | CLI | Complete |
 | Module 4 regression | Passed |
-| Automated tests | 62/62 passed |
-| Test coverage | 94% |
+| Automated tests | 84/84 passed |
+| Full hospital_client regression | 249/249 passed |
+| Test coverage | 97% |
 | Module 7 contract | Documented |
 
 ## 27. Module 5 → Module 7 Boundary

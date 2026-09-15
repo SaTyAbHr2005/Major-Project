@@ -216,13 +216,17 @@ The 88% measured coverage means the majority of implemented code was exercised, 
 ## 21. Known Limitations
 - The module extracts metadata but does not guarantee the *clinical* validity of the images.
 - Inspection is strictly schema and file-level; it does not train models or execute federated learning.
+- Existing-split validation/preservation is implemented for image directory splits, but a standardized existing-split contract for tabular datasets (CSV/XLS/XLSX) is not currently exposed by Module 4. This is a future enhancement and does not affect the completed Module 4 image-split functionality.
 
 ## 22. Future Integration
-Later modules (Module 5: Automated Preprocessing) are intended to programmatically consume `dataset_profile.json` to automatically determine resizing bounds, normalizations, and imputations.
+Module 5: Automated Preprocessing consumes `dataset_profile.json` and performs the downstream preprocessing, quality validation, splitting, balancing, and output preparation.
+
+A future Module 4 enhancement may expose a standardized existing-split contract for tabular datasets (CSV/XLS/XLSX), allowing Module 5 to validate and preserve hospital-provided tabular train/validation/test assignments in the same structured manner as the implemented image split validation.
 
 ## 23. Completion Status
 - **Module 4: Dataset Ingestion and Inspection**
-- **Status:** Functionally complete
+- **Status:** Functionally complete and frozen
 - **Automated tests:** 21/21 passing
 - **Measured coverage:** 88%
+- **Remaining future enhancement:** Standardized existing-split validation/preservation for tabular datasets (CSV/XLS/XLSX)
 

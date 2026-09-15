@@ -1,47 +1,122 @@
+# ============================================================
 # Python
+# ============================================================
+
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 
-# Environments
-.env
-.venv
-env/
+
+# ============================================================
+# Python Virtual Environments
+# ============================================================
+
+.venv/
 venv/
+env/
 ENV/
 env.bak/
 venv.bak/
 
-# Testing
+
+# ============================================================
+# Environment / Secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+
+# ============================================================
+# Testing / Coverage
+# ============================================================
+
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
 .nox/
+.pyre/
+.mypy_cache/
+.ruff_cache/
 
+
+# ============================================================
 # IDE / Editor
+# ============================================================
+
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS Files
+
+# ============================================================
+# Operating System
+# ============================================================
+
 .DS_Store
 Thumbs.db
 
-# Project Specific Data & Outputs
+
+# ============================================================
+# Project Local Data / Generated Outputs
+# ============================================================
+
 /data/
 /datasets/
 /outputs/
+
+
+# ============================================================
+# Medical / Dataset Files
+# These should remain local and must not be committed.
+# ============================================================
+
 *.csv
 *.xls
 *.xlsx
-*.jpg
-*.png
-*.json
-!module4_readme.md
-!module5_readme.md
-!hospital_client/
 
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.tif
+*.tiff
+*.webp
+
+# Generated dataset profiles / preprocessing manifests & reports / model
+# metadata - wherever they're output, not just under the named dirs above.
+*.json
+
+
+# ============================================================
+# Model Artifacts / Checkpoints
+# Module 6: Model Management
+# ============================================================
+
+/artifacts/
+/model_artifacts/
+
+*.pt
+*.pth
+*.safetensors
+
+
+# ============================================================
+# Local Model / Application Caches
+# ============================================================
+
+/.cache/
+/cache/
+
+
+# ============================================================
+# Claude Code - Personal Development Configuration
+# ============================================================
+
+.claude/
+CLAUDE.md

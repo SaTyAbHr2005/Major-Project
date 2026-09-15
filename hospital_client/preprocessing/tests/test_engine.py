@@ -27,7 +27,11 @@ def dummy_profile(tmp_path):
             "dataset_type": "image",
             "source_path": str(data_dir),
             "target_column": "label",
-            "splits": {"train": [str(data_dir / "classA" / "1.jpg"), str(data_dir / "classB" / "2.jpg")]}
+            # No real split folders exist in this flat classA/classB layout,
+            # so no split is declared here (an inconsistent "splits" claim
+            # not matching the actual layout is now caught as AMBIGUOUS by
+            # split_validation.py, which this fixture must not trigger).
+            "splits": {}
         }, f)
     return prof
 

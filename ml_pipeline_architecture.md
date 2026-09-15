@@ -54,7 +54,7 @@ Local Inference
 
 - [x] COMPLETED: Module 4 — Dataset Ingestion and Inspection
 - [x] COMPLETED: Module 5 — Automated Preprocessing Engine
-- [ ] NOT COMPLETED: Module 6 — Model Management
+- [x] COMPLETED: Module 6 — Model Management
 - [ ] NOT COMPLETED: Module 7 — Local Deep Learning Training
 - [ ] NOT COMPLETED: Module 8 — Resource-Aware Training
 - [ ] NOT COMPLETED: Module 16 — Local Inference
@@ -69,7 +69,7 @@ Member 1 is responsible for the following ML-side modules:
 | :--- | :--- | :--- |
 | 4 | Dataset Ingestion and Inspection | [x] COMPLETED |
 | 5 | Automated Preprocessing Engine | [x] COMPLETED |
-| 6 | Model Management | [ ] NOT COMPLETED |
+| 6 | Model Management | [x] COMPLETED |
 | 7 | Local Deep Learning Training | [ ] NOT COMPLETED |
 | 8 | Resource-Aware Training | [ ] NOT COMPLETED |
 | 16 | Local Inference | [ ] NOT COMPLETED |
@@ -251,22 +251,55 @@ Module 5 also provides relevant metadata such as:
 - reproducibility information
 
 ## 7. Module 6: Model Management
-**Status: [ ] NOT COMPLETED**
+**Status: [x] COMPLETED**
 
-Module 6 will manage the ML model architecture used by the local training pipeline.
+Module 6 manages the ML model architectures used by the local training pipeline.
 
-The current project direction is based on lightweight CNN architectures suitable for the available hardware while remaining extensible.
+The implemented model catalog contains eight supported architectures organized into the project's resource-aware tiers:
 
-The intended primary model direction is: **EfficientNet-B0**
+### High-End
+- ViT-B/16
+- EfficientNet-B4
 
-The architecture is intended to support compatible models such as:
-- MobileNetV2
+### Medium-End
+- EfficientNet-B0
+- ResNet50
+
+### Low-End
 - ResNet18
-- other lightweight CNN architectures
-- future compatible architectures
+- MobileNetV2
 
-Module 6 will be responsible for model-related configuration and initialization.
-It will not perform federated aggregation.
+### Very-Low-End
+- MobileNetV3-Small
+- MobileViT-XXS
+
+Module 6 is responsible for:
+- model architecture registry/catalog
+- model configuration
+- model construction
+- model metadata
+- model artifact storage using safetensors
+- SHA-256 artifact integrity validation
+- strict model weight/key/shape validation
+- local immutable model versioning
+- model/preprocessing compatibility checks with Module 5
+- CPU/CUDA model handling and checkpoint portability
+- deterministic NumPy parameter extraction/loading for future federated integration
+- controlled pretrained-weight handling without silent downloads
+- model-management CLI operations
+
+EfficientNet-B0 remains the project's primary initial CNN direction, while the complete eight-model catalog is available for later resource-aware selection.
+
+Module 6 does not perform:
+- local model training
+- resource-aware model selection
+- federated aggregation
+- differential privacy
+- secure communication
+- Byzantine defense
+- inference execution
+
+Resource-aware model selection belongs to Module 8, local training belongs to Module 7, and federated aggregation belongs to Module 9.
 
 ## 8. Module 7: Local Deep Learning Training
 **Status: [ ] NOT COMPLETED**
@@ -545,12 +578,14 @@ The current Member 1 ML module status is:
 
 - [x] Module 4 — Dataset Ingestion and Inspection
 - [x] Module 5 — Automated Preprocessing Engine
-- [ ] Module 6 — Model Management
+- [x] Module 6 — Model Management
 - [ ] Module 7 — Local Deep Learning Training
 - [ ] Module 8 — Resource-Aware Training
 - [ ] Module 16 — Local Inference
 
-Only Modules 4 and 5 are currently marked as completed.
+Modules 4, 5, and 6 are currently marked as completed.
 
-Modules 6, 7, 8, and 16 should be marked completed only after their implementation and verification have been completed.
+### Remaining Task
+
+- [ ] Module 4 future enhancement: add standardized existing-split validation/preservation for tabular datasets (CSV/XLS/XLSX) when a hospital provides an already-split tabular dataset. This is a future enhancement and does not make the currently completed Module 4 implementation incomplete.
 
