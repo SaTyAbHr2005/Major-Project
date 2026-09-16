@@ -7,6 +7,9 @@ scikit-learn>=1.2.0
 Pillow>=10.0.0
 
 # System & Utilities
+# psutil is also used by Module 8 (Resource-Aware Training) for real CPU/RAM/
+# storage detection. Module 8's GPU utilization monitoring uses the nvidia-smi
+# CLI (bundled with the NVIDIA driver) via subprocess - no new package needed.
 psutil>=5.9.0
 
 # Excel Support (Reading & Testing)

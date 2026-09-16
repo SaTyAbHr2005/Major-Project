@@ -28,12 +28,13 @@ CNN Architecture / Model
         ↓
 Module 8
 Resource-Aware Training
-(future configuration provider)
+(real hardware detection, dynamic recommendations,
+resolved training configuration)
         ↓
 Module 7
 Local Deep Learning Training
         ↓
-Local Model Weights
+TrainingResult + ResourceStatistics
 + FederationHandoff
         ↓
 Differential Privacy
@@ -58,10 +59,10 @@ Local Inference
 - [x] COMPLETED: Module 5 — Automated Preprocessing Engine
 - [x] COMPLETED: Module 6 — Model Management
 - [x] COMPLETED: Module 7 — Local Deep Learning Training
-- [ ] NOT COMPLETED: Module 8 — Resource-Aware Training
+- [x] COMPLETED: Module 8 — Resource-Aware Training
 - [ ] NOT COMPLETED: Module 16 — Local Inference
 
-Modules 4, 5, 6, and 7 are currently marked as completed in this document.
+Modules 4, 5, 6, 7, and 8 are currently marked as completed in this document.
 
 ## 2. Member 1 ML Module Scope
 
@@ -73,7 +74,7 @@ Member 1 is responsible for the following ML-side modules:
 | 5 | Automated Preprocessing Engine | [x] COMPLETED |
 | 6 | Model Management | [x] COMPLETED |
 | 7 | Local Deep Learning Training | [x] COMPLETED |
-| 8 | Resource-Aware Training | [ ] NOT COMPLETED |
+| 8 | Resource-Aware Training | [x] COMPLETED |
 | 16 | Local Inference | [ ] NOT COMPLETED |
 
 These modules form the intended hospital-side ML pipeline.
@@ -424,41 +425,99 @@ protocol, and it does not send completion/failure notifications. Those are futur
 integrations.
 
 ## 9. Module 8: Resource-Aware Training
-**Status: [ ] NOT COMPLETED**
+**Status: [x] COMPLETED**
 
-Module 8 will adapt local training configuration to the hardware available at the hospital.
+Module 8 is the implemented hospital/local-side resource-aware training decision layer. It
+detects the actual local machine, evaluates what that specific machine can safely support, and
+dynamically generates up to three training-configuration recommendations. It is explicitly not
+built around any one developer's hardware - it was verified against simulated very-low/low/
+medium/high hardware profiles as well as the real physical development machine.
 
 Hospital systems may have different:
-- GPUs
-- GPU VRAM
-- CPUs
-- system RAM
+- GPUs / GPU VRAM
+- CPUs / system RAM
 - compute capabilities
 
-Resource-aware training can consider:
-- GPU availability
-- CUDA availability
-- available VRAM
-- system RAM
-- CPU availability
-- batch-size constraints
-- CPU fallback
+### Full Pipeline (implemented, exactly as executed by `cli.py`/`runner.py`)
 
-The objective is to allow the local training pipeline to operate within the available hardware resources.
-
-Conceptually:
 ```text
-Hospital Hardware
+Start training
         ↓
-Module 8
-Resource Detection
+Module 8 - resource evaluation      (real CPU/RAM/GPU/CUDA/VRAM/storage/network detection)
         ↓
-Training Configuration
+dataset evaluation                  (sample counts/num_classes from Module 5's manifest)
         ↓
-Module 7
-Local Training
+model selection                     (ResourceEvaluator: real measured parameter counts +
+        ↓                            real local dry-run memory/timing measurement for all
+        ↓                            8 Module 6 architectures -> <=3 recommendations)
+training configuration              (RecommendedConfig -> real Module 7 TrainingConfig)
+        ↓
+Module 7                            (Trainer.run(), called exactly as-is)
+        ↓
+actual training                     (TrainingResult)
+        ↓
+resource statistics                 (ResourceMonitor summary + adaptation log ->
+        ↓                            ResourceStatistics)
+Module 9                            (Module 7's own build_federation_handoff() ->
+                                     FederationHandoff, when training reached a
+                                     federation-ready status)
 ```
-Module 8 will not perform federated aggregation.
+
+### Implemented Responsibilities
+
+- **Hardware detection** (`hardware.py`, `resource_profile.py`): real CPU/RAM/GPU/CUDA/VRAM/
+  storage detection via `psutil` and `torch.cuda`, and a best-effort non-blocking network probe -
+  never required for local training.
+- **Device selection**: CUDA if available else CPU, decided once per machine, with an explicit,
+  never-hidden fallback reason when CPU is used instead of CUDA.
+- **Resource evaluation** (`evaluator.py`): assesses all 8 Module 6 architectures always, using
+  real measured parameter counts (Module 6's own `build_model()`/`count_parameters()`) and a
+  real local dry-run measurement (`profiler.py` - one genuine forward+backward+optimizer-step,
+  mirroring Module 7's own training step) to confirm memory fit and measure per-batch timing,
+  rather than relying on a pure heuristic.
+- **Dynamic three-way recommendations** (`recommender.py`): Recommended / High-Capacity-More-Time
+  / Fast-Lower-Resource, computed from the machine's own detected capability tier, never a fixed
+  per-machine mapping. Fewer than three are returned honestly (with an explanatory note) when
+  fewer are genuinely feasible - never padded with an unsafe option.
+- **EfficientNet-B0 always visible**: assessed and labeled (Recommended/High-Capacity/Fast/
+  Suitable/High Load/Unsafe) in every scenario, never forced into an unsafe slot.
+- **Numeric time estimation as a range** (`estimator.py`): every estimate reports a `_min`/`_max`
+  range and an explicit method/confidence (`baseline_estimate` -> `dry_run_estimate` ->
+  `measured_hardware_estimate`, the last built from real completed Module 7 runs) - never a
+  single falsely-precise number.
+- **Runtime monitoring** (`monitor.py`): background-thread CPU/RAM/VRAM sampling plus real GPU
+  utilization via the `nvidia-smi` CLI (no new Python dependency) during the actual Module 7 run.
+- **Runtime adaptation** (`adaptation.py`, `runner.py`): CUDA-OOM detection with bounded,
+  recorded, batch-size-halving retries around `Trainer.run()` - run/retry granularity, since
+  Module 7's training loop is intentionally unmodified.
+- **Resource statistics and the -> Module 9 handoff** (`statistics.py`, `runner.py`): a
+  structured, PHI-free `ResourceStatistics` record for every run, plus Module 7's own
+  `FederationHandoff` (via `build_federation_handoff()`, called unchanged) whenever training
+  reaches `TRAINING_COMPLETED_AWAITING_FEDERATION`.
+- **Configurable policy** (`policy.py`): every threshold/margin/candidate/budget/coefficient used
+  anywhere in the module lives on one `ResourcePolicy` dataclass, savable/loadable as JSON.
+- **CLI**: `python -m hospital_client.resource_training detect|recommend|train`.
+
+### Verification
+
+The implemented Module 8 test suite contains **94 passing tests**, covering hardware detection,
+device selection, resource evaluation across 4 simulated hardware tiers, real measured parameter
+counts, real dry-run memory/timing measurement (with a real-CUDA-OOM-propagation check),
+time-estimate ranges and all three estimation tiers, the recommendation algorithm (including
+EfficientNet-B0 in every role and a check that no banned accuracy-superiority phrase is ever
+generated), real GPU-utilization monitoring via `nvidia-smi`, CUDA-OOM adaptation, the CLI, and a
+real M4 -> M5 -> M6 -> M8 -> M7 integration test executed on CPU always and, on this development
+machine, also on the real CUDA RTX 3050 GPU.
+
+### Scope and Limitations
+
+Module 8 does not perform federated aggregation, does not implement Flower/FedAvg/FedProx, and
+does not perform formal research experiments or benchmarking (Module 20's responsibility). Real
+dry-run measurement approximates but does not replace a full training run (effects that only
+appear over a full epoch - DataLoader warm-up, sustained thermal/memory behavior - are not
+captured by a single measured batch), which is why time estimates are always presented as a
+range rather than a single number. Runtime adaptation operates at run/retry granularity, not
+intra-epoch, because Module 7's training loop was intentionally not modified.
 
 ## 10. Member 1 ML Training Flow
 
@@ -523,7 +582,7 @@ Therefore:
 - Module 4 operates locally
 - Module 5 operates locally
 - Module 7 performs local training
-- future Module 8 will operate locally
+- Module 8 detects hardware and evaluates resources locally
 - future Module 16 will perform local inference
 
 Module 7 prepares a validated `FederationHandoff`, but does not transmit it. Later federated-learning, privacy, and security components handle protected model information rather than raw medical images.
@@ -570,7 +629,7 @@ Module 16 will produce model predictions. It must not be described as guaranteei
 | Module 5 | Automated preprocessing and ML-ready data preparation | Hospital | Processed dataset / manifests / preprocessing metadata | [x] COMPLETED |
 | Module 6 | Model architecture and model management | Hospital | PyTorch model/configuration | [x] COMPLETED |
 | Module 7 | Local deep-learning training and evaluation | Hospital | TrainingResult / checkpoints / FederationHandoff | [x] COMPLETED |
-| Module 8 | Hardware/resource-aware training configuration | Hospital | Resource-aware training parameters | [ ] NOT COMPLETED |
+| Module 8 | Hardware/resource-aware training configuration | Hospital | RecommendedConfig / resolved TrainingConfig / ResourceStatistics | [x] COMPLETED |
 | Module 16 | Local model inference | Hospital | Model predictions | [ ] NOT COMPLETED |
 
 ## 14. Relationship with Other Project Modules
@@ -606,12 +665,12 @@ Member 1's modules connect with other project modules but do not absorb their re
 │  Model Management                             │
 │               ↓                               │
 │  Module 8                                     │
-│  Resource-Aware Configuration (future)        │
+│  Resource-Aware Training                      │
 │               ↓                               │
 │  Module 7                                     │
 │  Local Deep Learning Training                 │
 │               ↓                               │
-│       Local Model Weights                     │
+│       TrainingResult + ResourceStatistics     │
 │               ↓                               │
 │       FederationHandoff                        │
 │               ↓                               │
@@ -653,16 +712,16 @@ The current Member 1 ML module status is:
 - [x] Module 5 — Automated Preprocessing Engine
 - [x] Module 6 — Model Management
 - [x] Module 7 — Local Deep Learning Training
-- [ ] Module 8 — Resource-Aware Training
+- [x] Module 8 — Resource-Aware Training
 - [ ] Module 16 — Local Inference
 
-Modules 4, 5, 6, and 7 are currently marked as completed.
+Modules 4, 5, 6, 7, and 8 are currently marked as completed.
 
 ### Remaining Tasks / Future Work
 
 The following items are the remaining enhancements and integration work
-identified for the completed Module 4-7 implementation. These items do not
-mean that Modules 4, 5, 6, or 7 are incomplete.
+identified for the completed Module 4-8 implementation. These items do not
+mean that Modules 4, 5, 6, 7, or 8 are incomplete.
 
 #### 1. Module 4 — Existing-Split Validation and Preservation
 
@@ -765,3 +824,35 @@ round identifiers, and checksum validation.
 
 The federated orchestration and global-model round-trip remain outside the
 responsibility of Module 7.
+
+#### 8. Module 8 Real-Measurement Calibration at Scale
+
+- [ ] **Validate Module 8's real dry-run memory/timing measurement and its
+  fixed per-run overhead constant against larger, longer, real-world
+  training runs.**
+
+Module 8's memory and time estimates are built from a real local dry-run
+measurement (one forward+backward+optimizer-step on the exact machine,
+architecture, batch size, and precision being considered) rather than a pure
+heuristic, and every time estimate is presented as an explicit range rather
+than a single number. The fixed per-run overhead constant used in that range
+was calibrated against one real observation on the development machine (a
+very small synthetic dataset). The remaining work is to validate this
+calibration against a broader set of real dataset sizes, epoch counts, and
+hardware profiles, and to recalibrate the configurable policy coefficients
+if real-world measurements diverge meaningfully from the current estimates.
+
+#### 9. Module 9 Consumption of Module 8's Resource Statistics and Handoff
+
+- [ ] **Validate that a future Module 9 can consume Module 8's
+  `ResourceStatistics` and the `FederationHandoff` Module 8 obtains from
+  Module 7.**
+
+Module 8 already calls Module 7's own `build_federation_handoff()` after a
+training run reaches a federation-ready status, and already produces a
+structured, PHI-free `ResourceStatistics` record for every run. Module 9
+does not exist yet in this repository, so this consumption has not been
+verified end-to-end. The remaining integration work is to confirm that a
+future Module 9 can use these outputs (parameter arrays, metadata, protocol
+version, and resource/timing statistics) without requiring any change to
+Module 8's or Module 7's existing contracts.

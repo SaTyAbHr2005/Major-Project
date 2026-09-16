@@ -95,7 +95,8 @@ Thumbs.db
 
 # ============================================================
 # Model Artifacts / Checkpoints
-# Module 6: Model Management / Module 7: Local Deep Learning Training
+# Module 6: Model Management / Module 7: Local Deep Learning Training /
+# Module 8: Resource-Aware Training
 # ============================================================
 
 /artifacts/
@@ -105,8 +106,14 @@ Thumbs.db
 *.pth
 *.safetensors
 
-# Module 7 FederationHandoff parameter arrays (federation.py save()/load())
+# Module 7 FederationHandoff parameter arrays (federation.py save()/load()),
+# also written wherever Module 8's runner.py obtains a handoff after a
+# resource-aware training run.
 *.npz
+
+# Module 8 outputs (resource_training_history.json, per-run
+# *_resource_statistics.json) are already covered by the blanket *.json rule
+# above - no separate pattern needed.
 
 
 # ============================================================
