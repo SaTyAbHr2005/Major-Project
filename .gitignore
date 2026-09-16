@@ -95,7 +95,7 @@ Thumbs.db
 
 # ============================================================
 # Model Artifacts / Checkpoints
-# Module 6: Model Management
+# Module 6: Model Management / Module 7: Local Deep Learning Training
 # ============================================================
 
 /artifacts/
@@ -104,6 +104,9 @@ Thumbs.db
 *.pt
 *.pth
 *.safetensors
+
+# Module 7 FederationHandoff parameter arrays (federation.py save()/load())
+*.npz
 
 
 # ============================================================

@@ -26,13 +26,15 @@ Model Management
         ↓
 CNN Architecture / Model
         ↓
+Module 8
+Resource-Aware Training
+(future configuration provider)
+        ↓
 Module 7
 Local Deep Learning Training
         ↓
-Module 8
-Resource-Aware Training
-        ↓
 Local Model Weights
++ FederationHandoff
         ↓
 Differential Privacy
         ↓
@@ -55,11 +57,11 @@ Local Inference
 - [x] COMPLETED: Module 4 — Dataset Ingestion and Inspection
 - [x] COMPLETED: Module 5 — Automated Preprocessing Engine
 - [x] COMPLETED: Module 6 — Model Management
-- [ ] NOT COMPLETED: Module 7 — Local Deep Learning Training
+- [x] COMPLETED: Module 7 — Local Deep Learning Training
 - [ ] NOT COMPLETED: Module 8 — Resource-Aware Training
 - [ ] NOT COMPLETED: Module 16 — Local Inference
 
-Only Modules 4 and 5 are currently marked as completed in this document.
+Modules 4, 5, 6, and 7 are currently marked as completed in this document.
 
 ## 2. Member 1 ML Module Scope
 
@@ -70,7 +72,7 @@ Member 1 is responsible for the following ML-side modules:
 | 4 | Dataset Ingestion and Inspection | [x] COMPLETED |
 | 5 | Automated Preprocessing Engine | [x] COMPLETED |
 | 6 | Model Management | [x] COMPLETED |
-| 7 | Local Deep Learning Training | [ ] NOT COMPLETED |
+| 7 | Local Deep Learning Training | [x] COMPLETED |
 | 8 | Resource-Aware Training | [ ] NOT COMPLETED |
 | 16 | Local Inference | [ ] NOT COMPLETED |
 
@@ -302,55 +304,124 @@ Module 6 does not perform:
 Resource-aware model selection belongs to Module 8, local training belongs to Module 7, and federated aggregation belongs to Module 9.
 
 ## 8. Module 7: Local Deep Learning Training
-**Status: [ ] NOT COMPLETED**
+**Status: [x] COMPLETED**
 
-Module 7 will perform actual local deep-learning training using the hospital's local data.
+Module 7 is the implemented hospital/local-side PyTorch training engine. It consumes
+Module 5's prepared image-classification manifests, obtains a model from Module 6,
+trains it locally, evaluates it, tracks metrics, checkpoints the best result, and
+prepares a validated `FederationHandoff` for the future Module 9 federated-learning
+engine. Module 7 does not transmit or aggregate model updates.
 
 Conceptually:
 ```text
-Module 5 ML-ready data
+Module 5 ML-ready data / manifests
         ↓
-PyTorch Dataset/DataLoader
+PyTorch Dataset / DataLoader
         ↓
 Module 6 Model
+        ↓
+Optional Module 8 resolved configuration
         ↓
 Forward Pass
         ↓
 Loss Calculation
         ↓
-Backpropagation
+Backpropagation + Optimizer
         ↓
-Optimizer
-        ↓
-Local Model Update
+Optional LR Scheduler
         ↓
 Validation / Evaluation
         ↓
-Local Model Weights
+Best Model Checkpoint
+        ↓
+TrainingResult
+        ↓
+Validated FederationHandoff
 ```
 
-### Intended Responsibilities
-Module 7 will handle:
-- PyTorch DataLoader
-- batching
-- shuffling
-- model execution
-- forward pass
-- loss calculation
-- backpropagation
-- optimizer stepping
-- local epochs
-- validation
-- evaluation
-- checkpoints where applicable
-- generation of local model weights
+### Implemented Responsibilities
 
-Module 7 will not perform:
-- federated aggregation
-- global model aggregation
-- authentication
-- secure communication
-- Byzantine defense
+Module 7 handles:
+- PyTorch Dataset/DataLoader construction from Module 5 manifests
+- batching and deterministic shuffling
+- reproducible DataLoader worker RNG seeding
+- all eight Module 6 architectures through one common `Trainer`
+- forward pass, loss calculation, backpropagation, and optimizer stepping
+- local training epochs and validation/evaluation
+- accuracy, precision, recall, F1, per-class metrics, and confusion matrices
+- configurable early stopping and best-checkpoint selection
+- checkpoint/resume of optimizer, scheduler, GradScaler, epoch, bookkeeping, and RNG state
+- CUDA OOM handling without silent device/model fallback
+- optional mixed precision: `fp32`, `fp16`, and `auto`
+- LR schedulers: `none`, `reduce_on_plateau`, `step`, and `cosine`
+- structured `TrainingResult`
+- versioned `FederationHandoff` generation with parameter metadata and SHA-256 integrity validation
+- CLI support for precision, scheduler, worker-count, training, and validation configuration
+
+### Mixed Precision
+
+`precision` supports `fp32` (default), `fp16`, and `auto`. Precision is resolved once
+against the already-selected device. `fp16` requires CUDA; `auto` selects FP16 on CUDA
+and FP32 on CPU without changing the device. PyTorch's current AMP API and
+`GradScaler` are used, and scaler state is persisted across resume.
+
+### Learning-Rate Scheduling
+
+The common trainer supports:
+- `none` - default, unchanged behavior
+- `reduce_on_plateau` - stepped on validation loss
+- `step` - `StepLR`, stepped once per epoch
+- `cosine` - `CosineAnnealingLR`, stepped once per epoch
+
+Scheduler state is included in the private training-state checkpoint and restored on
+resume.
+
+### DataLoader Worker Reproducibility
+
+A `torch.Generator` controls shuffling, while worker processes receive deterministic
+Python, NumPy, and PyTorch seeds derived from the configured random seed and worker ID.
+The worker initializer is module-level so it remains picklable under Windows `spawn`.
+
+This establishes reproducible shuffling and worker-local RNG state for the same seed,
+worker count, and software/hardware stack. It does not claim bit-for-bit
+cross-platform/GPU determinism.
+
+### FederationHandoff Boundary
+
+`FederationHandoff` is a versioned Module 7 → Module 9 contract. It contains model
+identity, ordered parameters, parameter metadata, training/validation metrics,
+configuration, resolved device/precision, and optional caller-supplied `round_id` and
+`client_id`. Parameters are stored in `.npz`; metadata is stored separately in JSON.
+A SHA-256 checksum detects parameter corruption or tampering.
+
+Module 7 does not implement Flower, FedAvg/FedProx, network transport, aggregation,
+authentication, differential privacy, or secure communication. Those responsibilities
+remain with the later modules.
+
+### Verification
+
+The implemented Module 7 test suite contains **165 passing tests**, and the full
+`hospital_client/` suite contains **414 passing tests with 0 failures**. Training
+coverage is **98% (1774 statements, 39 missed)**.
+
+Additional real-hardware verification included:
+- CPU + FP32 + cosine scheduler + `num_workers=2`
+- CUDA on an NVIDIA GeForce RTX 3050 Laptop GPU + FP16 + StepLR
+- real AMP/autocast and GradScaler execution
+- valid FederationHandoff generation and validation
+- save/load round-trip with byte-identical parameter arrays
+
+### Scope and Limitations
+
+Module 7 is **single-GPU only** as currently implemented. No throughput/memory
+benchmark was performed for FP16, so no performance claim is made. Tests use tiny
+synthetic datasets for functional verification and therefore do not establish
+medical-imaging accuracy or clinical validity. Formal research experiments belong to
+Module 20.
+
+Module 7 does not yet receive a federated global model through a Module 9 round-trip
+protocol, and it does not send completion/failure notifications. Those are future
+integrations.
 
 ## 9. Module 8: Resource-Aware Training
 **Status: [ ] NOT COMPLETED**
@@ -451,11 +522,11 @@ Therefore:
 - raw patient records remain local
 - Module 4 operates locally
 - Module 5 operates locally
-- future Module 7 will perform local training
+- Module 7 performs local training
 - future Module 8 will operate locally
 - future Module 16 will perform local inference
 
-Later federated-learning components communicate protected model information rather than raw medical images.
+Module 7 prepares a validated `FederationHandoff`, but does not transmit it. Later federated-learning, privacy, and security components handle protected model information rather than raw medical images.
 
 Federated learning does not mean that absolutely nothing leaves the hospital. Model updates and required system information may leave the hospital and therefore require appropriate privacy and security mechanisms in later modules.
 
@@ -497,8 +568,8 @@ Module 16 will produce model predictions. It must not be described as guaranteei
 | :--- | :--- | :--- | :--- | :--- |
 | Module 4 | Dataset ingestion, validation and profiling | Hospital | DatasetProfile | [x] COMPLETED |
 | Module 5 | Automated preprocessing and ML-ready data preparation | Hospital | Processed dataset / manifests / preprocessing metadata | [x] COMPLETED |
-| Module 6 | Model architecture and model management | Hospital | PyTorch model/configuration | [ ] NOT COMPLETED |
-| Module 7 | Local deep-learning training and evaluation | Hospital | Local model weights/checkpoints | [ ] NOT COMPLETED |
+| Module 6 | Model architecture and model management | Hospital | PyTorch model/configuration | [x] COMPLETED |
+| Module 7 | Local deep-learning training and evaluation | Hospital | TrainingResult / checkpoints / FederationHandoff | [x] COMPLETED |
 | Module 8 | Hardware/resource-aware training configuration | Hospital | Resource-aware training parameters | [ ] NOT COMPLETED |
 | Module 16 | Local model inference | Hospital | Model predictions | [ ] NOT COMPLETED |
 
@@ -535,12 +606,14 @@ Member 1's modules connect with other project modules but do not absorb their re
 │  Model Management                             │
 │               ↓                               │
 │  Module 8                                     │
-│  Resource-Aware Configuration                 │
+│  Resource-Aware Configuration (future)        │
 │               ↓                               │
 │  Module 7                                     │
 │  Local Deep Learning Training                 │
 │               ↓                               │
 │       Local Model Weights                     │
+│               ↓                               │
+│       FederationHandoff                        │
 │               ↓                               │
 │       Later Privacy / FL Modules              │
 │                                               │
@@ -579,13 +652,116 @@ The current Member 1 ML module status is:
 - [x] Module 4 — Dataset Ingestion and Inspection
 - [x] Module 5 — Automated Preprocessing Engine
 - [x] Module 6 — Model Management
-- [ ] Module 7 — Local Deep Learning Training
+- [x] Module 7 — Local Deep Learning Training
 - [ ] Module 8 — Resource-Aware Training
 - [ ] Module 16 — Local Inference
 
-Modules 4, 5, and 6 are currently marked as completed.
+Modules 4, 5, 6, and 7 are currently marked as completed.
 
-### Remaining Task
+### Remaining Tasks / Future Work
 
-- [ ] Module 4 future enhancement: add standardized existing-split validation/preservation for tabular datasets (CSV/XLS/XLSX) when a hospital provides an already-split tabular dataset. This is a future enhancement and does not make the currently completed Module 4 implementation incomplete.
+The following items are the remaining enhancements and integration work
+identified for the completed Module 4-7 implementation. These items do not
+mean that Modules 4, 5, 6, or 7 are incomplete.
 
+#### 1. Module 4 — Existing-Split Validation and Preservation
+
+- [ ] **Add standardized existing-split validation/preservation for tabular
+  datasets (CSV/XLS/XLSX).**
+
+When a hospital provides a tabular dataset that is already divided into
+training, validation, and test sets, Module 4 should recognize the existing
+split structure instead of unnecessarily creating a new split. The
+enhancement should validate that the supplied partitions are present,
+structurally valid, and usable by downstream modules, while preserving the
+hospital-provided split decisions. The validated split information should be
+passed consistently to Module 5 and the later training pipeline.
+
+This is a future enhancement to the completed Module 4 implementation. It
+does not make the current Module 4 implementation incomplete.
+
+#### 2. Module 18 — Notification Integration
+
+- [ ] **Notification integration (Module 18 - see §21)**
+
+Module 7 already produces a structured `TrainingResult` representing training
+completion, failure, or interruption. It also produces a validated
+`FederationHandoff` when the training run generates a handoff artifact.
+The remaining work is to connect these outputs to the platform's notification
+layer.
+
+Module 18 should consume the training status and relevant result information
+and deliver appropriate notifications to the intended researcher, hospital
+operator, or user interface. Notifications may cover events such as training
+completion, training failure, and training interruption. The notification
+delivery mechanism itself is outside Module 7.
+
+#### 3. Module 20 — Medical Accuracy / Research Experiments
+
+- [ ] **Medical accuracy / research experiments (Module 20 - see §21)**
+
+Module 7 calculates standard classification metrics including accuracy,
+precision, recall, F1, per-class metrics, and a confusion matrix for the
+dataset supplied to it. However, its functional tests use small synthetic
+datasets and are intended to establish software correctness rather than real
+medical-imaging accuracy.
+
+The remaining research work is therefore to perform formal experiments on
+appropriate real medical-imaging datasets, compare the supported models and
+training configurations, establish suitable experimental or clinical
+baselines, perform benchmarking, analyze the resulting metrics, and document
+the findings in a research-oriented manner. Any discussion of medical
+accuracy, clinical relevance, or model superiority should be based on these
+formal experiments rather than Module 7's functional test results.
+
+#### 4. Mixed-Precision Performance Benchmarking
+
+- [ ] **Benchmark FP32 versus FP16 mixed-precision training on CUDA hardware.**
+
+Module 7 has verified that FP16 mixed-precision training works end-to-end on
+real CUDA hardware, but a throughput and memory benchmark was not performed.
+The remaining work is to measure training time, throughput, and GPU memory
+usage for comparable FP32 and FP16 configurations and document the results.
+The benchmark should be treated as an experimental measurement rather than
+assuming a speed-up or memory reduction.
+
+#### 5. Cross-Environment Reproducibility Validation
+
+- [ ] **Extend reproducibility validation beyond the same
+  machine/software-stack configuration.**
+
+Module 7's deterministic DataLoader worker seeding provides reproducible
+worker behavior when the seed and worker count are kept consistent on the
+same machine and software stack. Further validation can examine behavior
+across different operating systems, hardware configurations, PyTorch/CUDA
+versions, and other environments. The purpose is to document the practical
+reproducibility boundary rather than claim universal bit-for-bit
+determinism.
+
+#### 6. Extended Training and Checkpoint Validation
+
+- [ ] **Run additional end-to-end training experiments across the supported
+  configurations.**
+
+The implementation should be exercised with longer training runs and a
+broader combination of model architectures, precision modes, learning-rate
+scheduler configurations, worker counts, and checkpoint/resume scenarios.
+This provides additional validation beyond the small synthetic functional
+tests and helps identify configuration-specific issues before broader
+platform integration.
+
+#### 7. Federation Handoff Integration Validation
+
+- [ ] **Validate consumption of the Module 7 `FederationHandoff` by the
+  subsequent federated workflow.**
+
+Module 7 already creates and validates the versioned handoff contract, but
+the completed Module 7 implementation does not itself implement the
+federated round-trip in which a global model is received and subsequently
+used for local training. The remaining integration work is to verify that
+the handoff artifact can be consumed correctly by the later federated
+workflow, including parameter files, metadata, protocol version, client and
+round identifiers, and checksum validation.
+
+The federated orchestration and global-model round-trip remain outside the
+responsibility of Module 7.
