@@ -111,6 +111,9 @@ Thumbs.db
 # resource-aware training run.
 *.npz
 
+# Module 16 (Local Inference) writes no files - it never stores images, results,
+# or models - so it needs no ignore rules.
+
 # Module 8 outputs (resource_training_history.json, per-run
 # *_resource_statistics.json) are already covered by the blanket *.json rule
 # above - no separate pattern needed.

@@ -22,7 +22,8 @@ pytest>=7.0.0
 pytest-cov>=4.0.0
 
 # Deep Learning (Module 6: Model Management; Module 7: Local Deep Learning
-# Training). torch>=2.3.0 is required (raised from >=2.0.0) because Module 7
+# Training; Module 16: Local Inference). Module 16 adds no new package - it reuses
+# torch, torchvision, safetensors and Pillow. torch>=2.3.0 is required (raised from >=2.0.0) because Module 7
 # uses the device-agnostic torch.amp.GradScaler(device=...) API for optional
 # mixed-precision training, which does not exist in earlier 2.x releases.
 torch>=2.3.0
