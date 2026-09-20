@@ -27,6 +27,7 @@ from hospital_client.training.checkpoint import (
 )
 from hospital_client.training.config import TrainingConfig, validate_training_config
 from hospital_client.training.dataloader import build_dataloaders
+from hospital_client.training.dataset import TASK_TYPE, build_preprocessing_spec
 from hospital_client.training.federation import FederationHandoff, build_federation_handoff as _build_federation_handoff
 from hospital_client.training.losses import build_loss
 from hospital_client.training.metrics import compute_classification_metrics
@@ -151,6 +152,10 @@ class Trainer:
                                 "random_seed": config.random_seed,
                                 "class_mapping": prepared.class_mapping,
                                 "num_classes": len(prepared.class_mapping),
+                                "task_type": TASK_TYPE,
+                                "preprocessing_spec": build_preprocessing_spec(
+                                    config.model_config.color_mode, tuple(config.model_config.input_size),
+                                    prepared.train_manifest_metadata.get("image_preprocessing")),
                             },
                         )
                         checkpoint_model_id, checkpoint_version = config.model_id, metadata.version
@@ -192,6 +197,10 @@ class Trainer:
                     "epochs": epochs_run, "optimizer": config.optimizer,
                     "learning_rate": config.learning_rate, "random_seed": config.random_seed,
                     "class_mapping": prepared.class_mapping, "num_classes": len(prepared.class_mapping),
+                    "task_type": TASK_TYPE,
+                    "preprocessing_spec": build_preprocessing_spec(
+                        config.model_config.color_mode, tuple(config.model_config.input_size),
+                        prepared.train_manifest_metadata.get("image_preprocessing")),
                 },
             )
             checkpoint_model_id, checkpoint_version, best_epoch = config.model_id, metadata.version, epochs_run

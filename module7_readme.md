@@ -244,6 +244,14 @@ returns the versioned `FederationHandoff` described in §20. **Module 7
 never transmits this object anywhere, never imports Flower, and performs no
 aggregation.**
 
+### Recorded task and preprocessing spec
+
+Each saved checkpoint's Module 6 metadata records `task_type` (`image_classification`) and a versioned
+`preprocessing_spec` (`training.dataset.build_preprocessing_spec`): color mode, input size, resize
+method/interpolation, normalization (none), value range, channel order, dtype, and an `upstream` block copied
+from the Module 5 manifest's `image_preprocessing` metadata (lazy/materialized mode, color mode, target size)
+when present. Module 16 (Local Inference) uses it to reproduce and verify the training input pipeline.
+
 ## 13. Privacy Boundary
 
 All dataset loading and training happen entirely on the local filesystem
@@ -353,6 +361,9 @@ than fail or fabricate a result.
   future design, not Module 7's.
 - Notification of training completion/failure to a user interface is not
   implemented here - see §21.
+- Checkpoints saved, and Module 5 manifests written, before the `task_type`/
+  `preprocessing_spec`/`image_preprocessing` metadata existed carry no spec or
+  `upstream` block, so Module 16 cannot verify their preprocessing.
 
 ## 17. Mixed Precision (Optional)
 

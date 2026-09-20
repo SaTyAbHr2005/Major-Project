@@ -236,9 +236,19 @@ class PreprocessingEngine:
             "detected_splits": detected_splits,
             "validation": split_validation.to_dict(),
         }
+        image_cfg = self.config.image
+        materialized = self.config.dataset.output_mode == OutputMode.MATERIALIZED
+        image_preprocessing_meta = {
+            "output_mode": "materialized" if materialized else "lazy",
+            "color_mode": image_cfg.color_mode,
+            "target_size": list(image_cfg.target_size) if image_cfg.target_size else None,
+            # BaseTransformer resizes with LANCZOS and saves with Pillow's default encoder (lossy for JPEG/WEBP).
+            "resize_method": "LANCZOS" if materialized and image_cfg.target_size else None,
+        }
         for split_name, records in splits_map.items():
             meta = {"balancing": balancing_meta, "augmentations": aug_meta} if split_name == "train" else {}
             meta["split_assignment"] = split_assignment_meta
+            meta["image_preprocessing"] = image_preprocessing_meta
             self.manifest_builder.build_manifest(split_name, records, meta)
 
         # 6. Report

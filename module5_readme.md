@@ -385,6 +385,10 @@ Manifest information can include:
 - transformation metadata
 - augmentation metadata
 - downstream-required information
+- `image_preprocessing`: the image settings applied by this run - `output_mode` (`lazy`/`materialized`),
+  `color_mode`, `target_size`, and `resize_method` (`LANCZOS` for materialized resizing, otherwise `null`).
+  Added additively so Module 7 can record it and Module 16 (Local Inference) can reproduce the same input
+  pipeline; older manifests without it remain valid.
 
 This prevents Module 7 from having to rediscover the dataset.
 

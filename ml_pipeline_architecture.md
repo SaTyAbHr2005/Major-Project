@@ -60,9 +60,9 @@ Local Inference
 - [x] COMPLETED: Module 6 — Model Management
 - [x] COMPLETED: Module 7 — Local Deep Learning Training
 - [x] COMPLETED: Module 8 — Resource-Aware Training
-- [ ] NOT COMPLETED: Module 16 — Local Inference
+- [x] COMPLETED: Module 16 — Local Inference
 
-Modules 4, 5, 6, 7, and 8 are currently marked as completed in this document.
+All six Member 1 ML modules (4, 5, 6, 7, 8, and 16) are currently marked as completed in this document.
 
 ## 2. Member 1 ML Module Scope
 
@@ -75,7 +75,7 @@ Member 1 is responsible for the following ML-side modules:
 | 6 | Model Management | [x] COMPLETED |
 | 7 | Local Deep Learning Training | [x] COMPLETED |
 | 8 | Resource-Aware Training | [x] COMPLETED |
-| 16 | Local Inference | [ ] NOT COMPLETED |
+| 16 | Local Inference | [x] COMPLETED |
 
 These modules form the intended hospital-side ML pipeline.
 
@@ -583,43 +583,90 @@ Therefore:
 - Module 5 operates locally
 - Module 7 performs local training
 - Module 8 detects hardware and evaluates resources locally
-- future Module 16 will perform local inference
+- Module 16 performs inference locally (it has no network capability, and never writes or copies the image)
 
 Module 7 prepares a validated `FederationHandoff`, but does not transmit it. Later federated-learning, privacy, and security components handle protected model information rather than raw medical images.
 
 Federated learning does not mean that absolutely nothing leaves the hospital. Model updates and required system information may leave the hospital and therefore require appropriate privacy and security mechanisms in later modules.
 
 ## 12. Module 16: Local Inference
-**Status: [ ] NOT COMPLETED**
+**Status: [x] COMPLETED**
 
-Module 16 will provide local model inference at the hospital.
+Module 16 is the implemented hospital-side local inference engine. It runs an approved Module 6 model
+on a **new local image entirely on the hospital machine** and returns a structured `InferenceResult`.
+Full details: `module16_readme.md`.
 
-The approved model will be loaded within the hospital-side environment.
+> Modules 9-15 are not required for standalone local inference testing. Module 16 provides
+> integration interfaces for their future implementation.
 
-Conceptually:
 ```text
-Approved Model
+ApprovedModelProvider  →  LocalModelArtifact        (local Module 6 artifact; future modules plug in here)
       ↓
-Module 16
+Module 6 ModelStore.load_checkpoint()               (SHA-256 integrity + strict validation, safetensors only)
       ↓
-New Local Medical Image
+InferenceModelSpec                                  (validated: class mapping, input spec, status, task)
       ↓
-Module 5 Preprocessing
+New local image → validate (Module 4) → preprocess (Module 7 training transform, Module 5-compatible)
       ↓
-Model Input
+model.eval() + torch.inference_mode() → softmax → stored class_mapping
       ↓
-CNN
-      ↓
-Prediction
+InferenceResult  →  LocalInferenceService / CLI / Hospital Desktop (Module 3)
 ```
 
-### Privacy Behavior
-New patient images remain local. The image will not be sent to the central federated aggregation service merely to obtain a prediction.
+### Implemented Now
+- One generic `LocalInferenceEngine` for all eight Module 6 architectures (no per-architecture code, no
+  second registry/checkpoint format/preprocessing implementation).
+- Model validation through Module 6 plus an adapter over its metadata; a missing class mapping, input spec,
+  or preprocessing information rejects the model rather than being guessed. Module 7 now records `task_type`
+  and a versioned `preprocessing_spec` in Module 6 metadata; Module 16 verifies the spec and rejects a
+  mismatch. Module 5's recorded lazy/materialized mode is carried into the spec, so materialized-data models are
+  reproduced automatically. Older artifacts without them run with explicit warnings (task inferred, spec unverified).
+- Preprocessing identical to what Module 7 trained/evaluated with (verified against the real Module 7
+  dataset and the real Module 5 `BaseTransformer`); Module 5 `ImageConfig` compatibility via Module 6's
+  `check_compatibility`.
+- Read-only, validated image input (Module 4 checks; corrupt/zero-byte/unsupported/oversized/high-bit-depth
+  images rejected; the image is never modified and its path never appears in errors, results, or logs).
+- CPU and CUDA inference with no silent fallback for explicit devices; opt-in `auto` selection delegating to Module 8,
+  with a VRAM-headroom check and an explicit, recorded CPU fallback.
+- Deterministic forward-pass settings (same-machine repeatability) and a thread-safe engine (lock).
+- Sanitized `reference`, scrubbed store paths, single-read image loading, DICOM rejected explicitly, and an
+  `environment` block (torch/CUDA/device/precision) in every result.
+- Softmax confidence presented strictly as a model output, with a standing non-diagnosis disclaimer.
+- `LocalInferenceService` facade (for Module 3) and a CLI (`python -m hospital_client.inference`).
+- 213 tests, including real Module 4 → 5 → 7 → 16 integration and real CUDA runs.
 
-Module 5 preprocessing routines can be reused locally so that inference input processing remains consistent with the model's expected preprocessing configuration.
+### Future Integration Interfaces (not implemented)
+- **Module 9**: a global model must first become a Module 6 artifact; a `FederationHandoff` is not an approved source.
+- **Module 10**: `extension_metadata` pass-through only; no DP logic in inference.
+- **Module 11**: an `ApprovedModelProvider` that fetches over an authenticated channel; no secure-download claim is made today.
+- **Module 14**: artifact-storage provider backend and consumer of `InferenceResult.to_dict()`; persistence is outside Module 16.
+- **Module 15**: supplies approval/version decisions through `LocalModelArtifact` (`platform_approved`, `provenance`);
+  Module 16 already requires an explicit version and preserves it in the result.
+
+### Privacy Behavior
+New patient images remain local: the inference package imports no network library, works with all network
+primitives disabled, and writes nothing. Results never contain pixels, base64, or the image path/filename.
+
+### Cross-Module Changes (additive, reported)
+- Module 6: two optional `ModelMetadata` fields (`task_type`, `preprocessing_spec`).
+- Module 7: `Trainer` records them (via `training.dataset.build_preprocessing_spec`), including Module 5's upstream settings.
+- Module 5: each manifest's `metadata` gains `image_preprocessing` (output mode, color mode, target size, resize method).
+No existing behaviour, file format, or test of Modules 4-8 changed; older manifests/models still load.
+
+### Remaining Limitations (see `module16_readme.md` §15)
+- Scope is image classification; detection/segmentation are intentionally out of scope.
+- Models saved before the metadata changes are not verified against a stored spec; Module 5's `normalization`
+  is unimplemented; the lazy (bilinear) vs materialized (LANCZOS) resize difference in Modules 5/7 is unchanged.
+- SHA-256 integrity is not authenticity; approval and trusted delivery need Modules 11, 14 and 15.
+- No DICOM, 16-bit, or batch input.
+- Confidence is uncalibrated softmax with no out-of-distribution detection; no validation on real medical data
+  (Module 20).
+- Determinism holds on the same machine only; fp32 only; peak memory is CUDA-only; the `auto` VRAM check is a heuristic.
+- No persistence, audit, or telemetry (Modules 13/14); Modules 9-15 are unimplemented and Module 3 integration is untested.
 
 ### Important Limitation
-Module 16 will produce model predictions. It must not be described as guaranteeing clinical diagnosis or clinical validity.
+Module 16 produces model predictions. It must not be described as guaranteeing clinical diagnosis or
+clinical validity; confidence is an uncalibrated softmax output, not clinical certainty.
 
 ## 13. Member 1 Module Boundaries
 
@@ -630,7 +677,7 @@ Module 16 will produce model predictions. It must not be described as guaranteei
 | Module 6 | Model architecture and model management | Hospital | PyTorch model/configuration | [x] COMPLETED |
 | Module 7 | Local deep-learning training and evaluation | Hospital | TrainingResult / checkpoints / FederationHandoff | [x] COMPLETED |
 | Module 8 | Hardware/resource-aware training configuration | Hospital | RecommendedConfig / resolved TrainingConfig / ResourceStatistics | [x] COMPLETED |
-| Module 16 | Local model inference | Hospital | Model predictions | [ ] NOT COMPLETED |
+| Module 16 | Local model inference | Hospital | InferenceResult (model predictions) | [x] COMPLETED |
 
 ## 14. Relationship with Other Project Modules
 
@@ -713,15 +760,15 @@ The current Member 1 ML module status is:
 - [x] Module 6 — Model Management
 - [x] Module 7 — Local Deep Learning Training
 - [x] Module 8 — Resource-Aware Training
-- [ ] Module 16 — Local Inference
+- [x] Module 16 — Local Inference
 
-Modules 4, 5, 6, 7, and 8 are currently marked as completed.
+Modules 4, 5, 6, 7, 8, and 16 are currently marked as completed.
 
 ### Remaining Tasks / Future Work
 
 The following items are the remaining enhancements and integration work
-identified for the completed Module 4-8 implementation. These items do not
-mean that Modules 4, 5, 6, 7, or 8 are incomplete.
+identified for the completed Module 4-8 and Module 16 implementations. These
+items do not mean that Modules 4, 5, 6, 7, 8, or 16 are incomplete.
 
 #### 1. Module 4 — Existing-Split Validation and Preservation
 
@@ -856,3 +903,32 @@ verified end-to-end. The remaining integration work is to confirm that a
 future Module 9 can use these outputs (parameter arrays, metadata, protocol
 version, and resource/timing statistics) without requiring any change to
 Module 8's or Module 7's existing contracts.
+
+#### 10. Module 16 — Preprocessing Metadata for Older Models and Module 5 Resize Consistency
+
+- [ ] **Re-save or retrain models created before the `preprocessing_spec`/`upstream` metadata existed**, so
+  Module 16 can verify their preprocessing instead of warning.
+- [ ] **Resolve the lazy (bilinear) vs materialized (LANCZOS) resize difference in Modules 5/7**, so both
+  training modes feed the model the same kind of resized input.
+
+#### 11. Module 16 — Provisioning, Approval, and Authenticity
+
+- [ ] **Connect `ApprovedModelProvider` to Modules 15, 14, and 11, and add artifact
+  authenticity.**
+
+Module 16 provisions only local Module 6 artifacts, records them as not
+platform-approved, and relies on Module 6's SHA-256, which detects corruption but not
+replacement of both the weights and their metadata. Approval decisions (Module 15),
+artifact storage (Module 14), and authenticated delivery (Module 11) are needed before
+any claim of approved, authentic model provisioning can be made.
+
+#### 12. Module 16 — Real-Data Validation and Clinical-Workflow Integration
+
+- [ ] **Evaluate inference on real trained models and real medical images, and integrate with the
+  Hospital Desktop (Module 3).**
+
+Module 16's tests use synthetic images and untrained/1-epoch models, so they establish
+software correctness only. Remaining work includes evaluation on appropriate real datasets
+(Module 20), confidence calibration and out-of-distribution handling, support for medical
+formats not covered today (DICOM, 16-bit images, batch input, a pluggable image-provider
+abstraction), and end-to-end testing with the Hospital Desktop once Module 3 exists.

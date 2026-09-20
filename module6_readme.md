@@ -429,6 +429,15 @@ Training-specific fields are defined for future use, including:
 
 Module 6 does not populate these as evidence that training occurred.
 
+Two optional fields were added for Module 16 (Local Inference), also populated
+only by Module 7 after real training; both default to `None`, and older
+`metadata.json` files without them still load:
+
+- task_type (e.g. `image_classification`)
+- preprocessing_spec (versioned description of the input pipeline the model
+  was trained with: color mode, input size, resize method/interpolation,
+  normalization, value range, channel order, dtype)
+
 Module 7 should populate training-specific metadata after an actual training
 run.
 

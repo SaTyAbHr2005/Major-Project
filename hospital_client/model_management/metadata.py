@@ -40,6 +40,9 @@ class ModelMetadata:
     class_mapping: Dict[str, int] = field(default_factory=dict)
 
     preprocessing_reference: Optional[str] = None
+    # Recorded by Module 7 at training time so inference can reproduce the exact input pipeline.
+    task_type: Optional[str] = None
+    preprocessing_spec: Optional[Dict[str, Any]] = None
     dataset_profile_reference: Optional[str] = None
     training_reference: Optional[str] = None
     parent_version: Optional[int] = None
@@ -75,6 +78,8 @@ class ModelMetadata:
             "num_classes": self.num_classes,
             "class_mapping": self.class_mapping,
             "preprocessing_reference": self.preprocessing_reference,
+            "task_type": self.task_type,
+            "preprocessing_spec": self.preprocessing_spec,
             "dataset_profile_reference": self.dataset_profile_reference,
             "training_reference": self.training_reference,
             "parent_version": self.parent_version,

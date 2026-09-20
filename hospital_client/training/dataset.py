@@ -89,6 +89,29 @@ def build_transform(color_mode: str, input_size: Tuple[int, int], augmentation_f
     return tv_transforms.Compose(ops)
 
 
+TASK_TYPE = "image_classification"
+PREPROCESSING_SPEC_VERSION = 1
+
+
+def build_preprocessing_spec(color_mode: str, input_size: Tuple[int, int], upstream: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Machine-readable description of what build_transform() does; stored with the model."""
+    spec = {
+        "version": PREPROCESSING_SPEC_VERSION,
+        "pipeline": "convert -> resize -> to_tensor",
+        "color_mode": color_mode,
+        "input_size": list(input_size),
+        "resize_method": "torchvision.transforms.Resize",
+        "interpolation": "bilinear",
+        "normalization": None,
+        "value_range": [0.0, 1.0],
+        "channel_order": "CHW",
+        "dtype": "float32",
+    }
+    if upstream is not None:  # Module 5's manifest["metadata"]["image_preprocessing"], when it recorded one
+        spec["upstream"] = dict(upstream)
+    return spec
+
+
 class ManifestImageDataset(Dataset):
     def __init__(
         self,
