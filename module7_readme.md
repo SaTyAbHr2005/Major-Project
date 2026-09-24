@@ -274,7 +274,7 @@ python -m hospital_client.training train \
     [--scheduler-step-size N] [--scheduler-gamma F]         (step) \
     [--scheduler-t-max N] [--scheduler-eta-min F]           (cosine) \
     [--early-stopping] [--early-stopping-metric ...] [--class-weighting none|manifest|balanced] \
-    [--num-workers N] [--seed N] [--no-validation] [--test] [--resume]
+    [--num-workers N] [--seed N] [--no-validation] [--test] [--plots] [--resume]
 
 python -m hospital_client.training validate-config <same flags as train>
 ```
@@ -283,6 +283,21 @@ python -m hospital_client.training validate-config <same flags as train>
 `TrainingResult`) in addition to printing the human-readable summary.
 `train`/`infer`/`federate` subcommands beyond `train`/`validate-config` are
 intentionally absent - inference and federation belong to Modules 16/9.
+
+### Evaluation plots (`--plots`)
+
+With `--test --plots`, `train` also writes `<output>/<model_id>_plots/`:
+`confusion_matrix.png` (counts and row-normalised), `roc_curves.png` and
+`pr_curves.png` (one-vs-rest per class; binary tasks show the positive class
+only) and `curve_metrics.json` (per-class ROC AUC / average precision, macro
+means, skipped classes). They are drawn from the class probabilities captured
+in the same test pass that produced `test_metrics` (`Trainer.test_outputs`),
+and carry the test-set size in the title. A class with no positive or no
+negative test samples has no defined curve and is listed as skipped. Only
+test-set aggregates are used - no images, paths or patient data. Requires
+`matplotlib` (imported lazily; training does not need it). Curves on a tiny
+test set are noisy and are not evidence of clinical performance. There is
+still no per-epoch history, and plots are test-set only.
 
 ## 15. Testing (actually executed)
 

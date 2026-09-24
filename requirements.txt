@@ -3,6 +3,10 @@ numpy>=1.24.0
 pandas>=2.0.0
 scikit-learn>=1.2.0
 
+# Evaluation plots (Module 7 --plots: confusion matrix, ROC, PR curves). Imported
+# lazily; training and inference do not need it.
+matplotlib>=3.7.0
+
 # Imaging
 Pillow>=10.0.0
 

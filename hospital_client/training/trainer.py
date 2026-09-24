@@ -64,6 +64,10 @@ class Trainer:
     def __init__(self, config: TrainingConfig):
         validate_training_config(config)
         self.config = config
+        # Filled by run() when a test set is evaluated: (y_true, class probabilities,
+        # class_order) from the SAME pass that produced result.test_metrics. Used by
+        # training.plots for ROC/PR curves; never written into TrainingResult.
+        self.test_outputs = None
 
     def run(self) -> TrainingResult:
         config = self.config
@@ -207,11 +211,13 @@ class Trainer:
 
         test_metrics_dict = None
         if prepared.test_loader is not None and failed_error is None and not interrupted:
+            collected = {}
             test_metrics = self._run_epoch(
                 model, prepared.test_loader, loss_fn, None, device, prepared.class_mapping,
-                train_mode=False, precision=precision, scaler=scaler,
+                train_mode=False, precision=precision, scaler=scaler, collect=collected,
             )
             test_metrics_dict = test_metrics.to_dict()
+            self.test_outputs = (collected["y_true"], collected["probs"], test_metrics.class_order)
 
         if failed_error is not None:
             status = TrainingStatus.TRAINING_FAILED
@@ -270,10 +276,10 @@ class Trainer:
             return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=t_max, eta_min=config.scheduler_eta_min)
         raise ValueError(f"Unknown scheduler {name!r}")
 
-    def _run_epoch(self, model, loader, loss_fn, optimizer, device, class_mapping, train_mode: bool, precision: str, scaler):
+    def _run_epoch(self, model, loader, loss_fn, optimizer, device, class_mapping, train_mode: bool, precision: str, scaler, collect=None):
         model.train(train_mode)
         total_loss, n_samples = 0.0, 0
-        all_true, all_pred = [], []
+        all_true, all_pred, all_probs = [], [], []
         autocast_enabled = precision == "fp16"
         with torch.set_grad_enabled(train_mode):
             for images, labels in loader:
@@ -295,6 +301,10 @@ class Trainer:
                 preds = outputs.argmax(dim=1)
                 all_true.extend(labels.detach().cpu().tolist())
                 all_pred.extend(preds.detach().cpu().tolist())
+                if collect is not None:
+                    all_probs.extend(torch.softmax(outputs.detach().float(), dim=1).cpu().tolist())
+        if collect is not None:
+            collect["y_true"], collect["probs"] = all_true, all_probs
         avg_loss = total_loss / n_samples if n_samples else 0.0
         return compute_classification_metrics(all_true, all_pred, avg_loss, class_mapping)
 

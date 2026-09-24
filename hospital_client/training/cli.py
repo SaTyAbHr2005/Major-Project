@@ -38,6 +38,7 @@ def _add_common_training_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--class-weighting", choices=["none", "manifest", "balanced"], default="none")
     p.add_argument("--no-validation", action="store_true", help="Train without requiring a validation manifest")
     p.add_argument("--test", dest="run_test_evaluation", action="store_true", help="Run final evaluation on the test manifest")
+    p.add_argument("--plots", action="store_true", help="After training, write confusion matrix / ROC / PR plots for the test set (requires --test and matplotlib)")
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--seed", dest="random_seed", type=int, default=42)
     p.add_argument("--resume", action="store_true")
@@ -98,12 +99,23 @@ def main():
     try:
         if args.command == "train":
             config = _config_from_args(args)
-            result = Trainer(config).run()
+            if args.plots and not config.run_test_evaluation:
+                raise ValueError("--plots requires --test (plots are generated from the test set).")
+            trainer = Trainer(config)
+            result = trainer.run()
             print(format_summary(result, args.architecture))
             result_path = f"{args.output_dir}/{config.model_id}_training_result.json"
             with open(result_path, "w") as f:
                 json.dump(result.to_dict(), f, indent=2)
             print(f"\nFull result written to: {result_path}")
+            if args.plots:
+                if trainer.test_outputs is None:
+                    print("No plots written: no test evaluation was produced (missing test manifest, or training did not complete).")
+                else:
+                    from hospital_client.training.plots import generate_evaluation_plots
+                    y_true, probs, class_order = trainer.test_outputs
+                    plots = generate_evaluation_plots(y_true, probs, class_order, args.output_dir, config.model_id)
+                    print(f"Evaluation plots written to: {plots['directory']}")
             if result.status.value == "TRAINING_FAILED":
                 sys.exit(1)
 
