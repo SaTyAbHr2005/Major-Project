@@ -126,12 +126,39 @@ export const AppProvider = ({ children }) => {
         setActiveTab: setActiveScreen,
         hospitalId: sessionUser?.hospital_id || 'HOSP_000001',
         hospitalName: sessionUser?.hospital_name || 'St. Jude Clinical Research & AI Node',
-        hardware: { cuda: true, gpu: 'NVIDIA RTX 3080 Ti', vram: '12.0 GB', driver: 'v535.129' },
+        hardware: { cuda: true, gpu: 'NVIDIA RTX 3080 Ti', vram: '12.0 GB', driver: 'v535.129', available_ram_gb: '24.8', cpu_cores: 16, cpu_name: 'AMD Ryzen 9 5900X' },
         activeTrainingSession: { status: 'IDLE' },
+        datasets: [
+          { id: 'DS_PED_XRAY', name: 'Pediatric Chest X-Ray Cohort', samples: 5840, modalities: ['DICOM CR/DX'], status: 'VALIDATED' },
+          { id: 'DS_BRAIN_MRI', name: 'Glioblastoma Multiphase MRI', samples: 1240, modalities: ['DICOM MR (T1/T2/FLAIR)'], status: 'VALIDATED' }
+        ],
+        activeDataset: {
+          id: 'DS_PED_XRAY',
+          name: 'Pediatric Chest X-Ray Cohort',
+          samples: 5840,
+          modalities: ['DICOM CR/DX'],
+          status: 'VALIDATED',
+          train_samples: 4205,
+          val_samples: 818,
+          test_samples: 817,
+          dicom_count: 5840,
+          patient_count: 3240,
+          modality: 'DICOM DX (Digital Radiography)',
+          anonymization_verified: true
+        },
+        trainingResult: null,
+        preprocessingReport: null,
         notifications: [
           { id: '1', title: 'New FL Training Round Invitation', time: '10m ago', read: false },
           { id: '2', title: 'Global Model Aggregation Sync', time: '1h ago', read: true }
         ],
+        messages: [
+          { id: '1', sender: 'Consortium Orchestrator', text: 'Training session request approved by Security Council.', time: '10:30 AM' }
+        ],
+        setMessages: () => {},
+        setPreprocessingReport: () => {},
+        setActiveDataset: () => {},
+        setTrainingResult: () => {},
         user: sessionUser || currentUser,
         
         currentUser,

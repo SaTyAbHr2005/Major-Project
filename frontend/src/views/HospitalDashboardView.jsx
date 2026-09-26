@@ -151,7 +151,7 @@ const DashboardView = () => {
             <Database size={14} color="var(--status-healthy)" />
           </div>
           <div className="font-mono text-emerald" style={{ fontSize: '16px', fontWeight: 700 }}>
-            {datasets.length} Cohorts Ingested
+            {(datasets || []).length} Cohorts Ingested
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
             5,840 Validated Radiographs
