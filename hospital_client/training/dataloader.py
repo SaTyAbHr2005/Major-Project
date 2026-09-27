@@ -8,7 +8,7 @@ Worker RNG reproducibility: each DataLoader worker process gets a seed
 deterministically derived from the configured random_seed (never
 hard-coded), so re-running with the same seed reproduces the same
 per-worker RNG state. This does NOT make GPU training bit-for-bit
-deterministic across runs/hardware (see module7_readme.md) - it only makes
+deterministic across runs/hardware (see docs/module7_readme.md) - it only makes
 worker-process randomness (e.g. any future per-sample randomness) traceable
 to the configured seed instead of the OS's own unseeded entropy.
 """

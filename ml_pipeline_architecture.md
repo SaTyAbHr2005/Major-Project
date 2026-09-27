@@ -607,7 +607,7 @@ Federated learning does not mean that absolutely nothing leaves the hospital. Mo
 
 Module 16 is the implemented hospital-side local inference engine. It runs an approved Module 6 model
 on a **new local image entirely on the hospital machine** and returns a structured `InferenceResult`.
-Full details: `module16_readme.md`.
+Full details: `docs/module16_readme.md`.
 
 > Modules 9-15 are not required for standalone local inference testing. Module 16 provides
 > integration interfaces for their future implementation.
@@ -669,7 +669,7 @@ the file in a `finally` block (verified by `hospital_client/local_api/tests`).
 - Module 5: each manifest's `metadata` gains `image_preprocessing` (output mode, color mode, target size, resize method).
 No existing behaviour, file format, or test of Modules 4-8 changed; older manifests/models still load.
 
-### Remaining Limitations (see `module16_readme.md` §15)
+### Remaining Limitations (see `docs/module16_readme.md` §15)
 - Scope is image classification; detection/segmentation are intentionally out of scope.
 - Models saved before the metadata changes are not verified against a stored spec; Module 5's `normalization`
   is unimplemented; the lazy (bilinear) vs materialized (LANCZOS) resize difference in Modules 5/7 is unchanged.

@@ -11,7 +11,7 @@ stop), governed by PreprocessingConfig.split.
 Only image datasets are covered here. Module 4's CSV/XLS/XLSX ingestion
 represents a single tabular file, not a directory split layout, so there is
 no existing-split concept to validate for tabular data (see
-module5_readme.md for this limitation).
+docs/module5_readme.md for this limitation).
 """
 import json
 import os

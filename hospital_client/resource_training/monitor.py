@@ -3,7 +3,7 @@ ResourceMonitor: samples CPU/RAM/VRAM on a background thread while Module 7's
 Trainer.run() executes normally in the foreground. Module 7 is never
 modified or wrapped internally - this only observes the process/GPU from
 the outside at a configurable interval, so overhead stays low and Module 7's
-training loop is untouched (see module8_readme.md limitations: this is
+training loop is untouched (see docs/module8_readme.md limitations: this is
 run-level observation, not an in-loop callback).
 """
 import threading

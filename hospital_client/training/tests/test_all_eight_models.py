@@ -3,7 +3,7 @@ Verifies all 8 Module 6 architectures through the SAME Module 7 training
 engine (hospital_client.training.trainer.Trainer) - not eight duplicated
 training implementations. Uses tiny synthetic datasets and 1 epoch each to
 stay practical; this establishes functional correctness, not medical
-accuracy (see module7_readme.md).
+accuracy (see docs/module7_readme.md).
 """
 import pytest
 

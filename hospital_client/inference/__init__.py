@@ -1,6 +1,6 @@
 """
 Module 16: Local Inference. Runs an approved Module 6 model on a NEW local
-image entirely on this machine - see module16_readme.md.
+image entirely on this machine - see docs/module16_readme.md.
 """
 from hospital_client.inference.engine import InferenceConfig, LocalInferenceEngine
 from hospital_client.inference.errors import (

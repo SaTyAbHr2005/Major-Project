@@ -75,7 +75,7 @@ ARCHITECTURE_CATALOG: Dict[str, ArchitectureInfo] = {
     "efficientnet_b0": ArchitectureInfo(
         "efficientnet_b0", "EfficientNet-B0", "EfficientNet", ResourceTier.MEDIUM_END,
         supports_pretrained=True, default_input_size=(224, 224),
-        notes="Project's initial primary architecture (see module6_readme.md).",
+        notes="Project's initial primary architecture (see docs/module6_readme.md).",
     ),
     "resnet50": ArchitectureInfo(
         "resnet50", "ResNet-50", "ResNet", ResourceTier.MEDIUM_END,

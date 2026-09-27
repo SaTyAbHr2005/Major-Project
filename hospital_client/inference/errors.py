@@ -1,6 +1,6 @@
 """
 Typed errors for Module 16. Messages never contain the patient image's path
-or filename (either can carry patient identifiers) - see module16_readme.md.
+or filename (either can carry patient identifiers) - see docs/module16_readme.md.
 """
 
 

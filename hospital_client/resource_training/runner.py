@@ -20,7 +20,7 @@ hooks) - this module only wraps the call. The FederationHandoff is built via
 Module 7's own existing `build_federation_handoff()` (see
 hospital_client.training.trainer) - Module 8 does not implement any part of
 Module 9 itself, it only carries the pipeline through to the handoff that
-Module 7 already knows how to produce. See module8_readme.md for why
+Module 7 already knows how to produce. See docs/module8_readme.md for why
 adaptation here is run-level, not intra-epoch.
 """
 from typing import List, Optional, Tuple

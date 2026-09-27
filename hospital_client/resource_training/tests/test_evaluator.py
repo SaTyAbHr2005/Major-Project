@@ -24,7 +24,7 @@ def test_evaluation_is_deterministic(medium_profile, policy, small_dataset_chara
     # The DECISION logic (model/batch/epoch/precision selection) must be
     # deterministic given the same inputs. Real dry-run wall-clock timing is
     # intentionally excluded from this check - it is a genuine measurement
-    # and is expected to vary slightly run to run (see module8_readme.md).
+    # and is expected to vary slightly run to run (see docs/module8_readme.md).
     policy.enable_dry_run_measurement = False
     evaluator = ResourceEvaluator(medium_profile, policy)
     first = evaluator.evaluate_model("resnet18", small_dataset_characteristics)

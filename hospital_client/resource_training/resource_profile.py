@@ -2,7 +2,7 @@
 ResourceProfile: the standardized snapshot of the local machine's hardware
 Module 8 evaluates against. Hardware/operational information only - never
 medical images, patient records, PHI, raw dataset contents, or model
-weights (see module8_readme.md privacy section).
+weights (see docs/module8_readme.md privacy section).
 """
 from dataclasses import dataclass, field
 from datetime import datetime, timezone

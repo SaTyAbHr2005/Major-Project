@@ -1,5 +1,5 @@
 """
-DataLoader worker RNG reproducibility. See module7_readme.md for the exact
+DataLoader worker RNG reproducibility. See docs/module7_readme.md for the exact
 reproducibility guarantees and limitations (this does NOT claim bit-for-bit
 GPU determinism).
 """

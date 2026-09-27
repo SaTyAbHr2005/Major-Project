@@ -70,7 +70,7 @@ class TrainingResult:
 
 
 def format_summary(result: TrainingResult, display_name: str) -> str:
-    """Human-readable local training summary (see module7_readme.md)."""
+    """Human-readable local training summary (see docs/module7_readme.md)."""
     lines = []
     if result.status in (TrainingStatus.TRAINING_COMPLETED, TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION):
         lines.append("Local training completed")

@@ -170,7 +170,7 @@ class ResourcePolicy:
     # checkpoint I/O) NOT captured by a single dry-run batch's timing - added
     # once per run to both bounds of the range. Calibrated against a real
     # measured run on this project's development machine (see
-    # module8_readme.md §11): a 25-sample/2-epoch run had ~31s actual duration
+    # docs/module8_readme.md §11): a 25-sample/2-epoch run had ~31s actual duration
     # against a ~2s pure per-batch extrapolation, i.e. ~29s of fixed overhead
     # for a run this small. Larger/longer runs amortize this the same way
     # Module 7 itself amortizes checkpointing - the constant is deliberately

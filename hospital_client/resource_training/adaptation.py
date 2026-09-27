@@ -2,7 +2,7 @@
 Runtime resource adaptation for Module 8. Operates at RUN/RETRY granularity
 around Module 7's Trainer.run() (runner.py) - Module 7's training loop is
 never modified, so adaptation cannot intervene mid-epoch. This is an
-explicit, documented limitation (see module8_readme.md).
+explicit, documented limitation (see docs/module8_readme.md).
 
 Every adaptation is bounded (max_adaptation_attempts) and recorded. Model
 architecture and device are NEVER silently changed here - only batch_size,

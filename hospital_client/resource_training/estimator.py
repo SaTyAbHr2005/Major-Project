@@ -1,7 +1,7 @@
 """
 Numeric memory and training-time ESTIMATION for Module 8. Every number
 produced here is explicitly labeled estimated/measured/configured-limit -
-never presented as a guaranteed measurement (module8_readme.md §11).
+never presented as a guaranteed measurement (docs/module8_readme.md §11).
 
 Memory estimate = measured parameter count (model_profiles.py) x configured
 byte/optimizer coefficients + a configured activation-memory heuristic.
@@ -63,7 +63,7 @@ def estimate_memory_mb(
 class TimeEstimate:
     # Central value retained for epoch-budget arithmetic and backward
     # compatibility - always prefer the _min/_max range for display, since a
-    # single point value is never presented as exact (see module8_readme.md).
+    # single point value is never presented as exact (see docs/module8_readme.md).
     estimated_training_time_seconds: float
     estimated_training_time_seconds_min: float
     estimated_training_time_seconds_max: float

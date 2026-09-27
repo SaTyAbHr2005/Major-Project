@@ -22,8 +22,9 @@ Major Project/
 │   ├── resource_training/  Module 8  - hardware-aware training recommendations
 │   ├── inference/          Module 16 - local inference
 │   └── local_api/          local ML service that lets the hospital screens run the pipeline
+├── docs/              per-module documentation (module1_readme.md ... module16_readme.md)
 ├── requirements.txt   Python packages
-└── *.md               architecture and per-module documentation (see section 9)
+└── *.md               README and architecture documents (see section 9)
 ```
 
 How the parts talk to each other:
@@ -260,8 +261,8 @@ Local ML service environment variables (all optional):
 |---|---|
 | `architecture.md` | overall platform architecture and team structure |
 | `ml_pipeline_architecture.md` | ML pipeline architecture and the Hospital Desktop integration |
-| `module1_readme.md` - `module3_readme.md` | authentication, researcher desktop, hospital desktop |
-| `module4_readme.md` - `module8_readme.md`, `module16_readme.md` | the ML modules (dataset, preprocessing, models, training, resource-aware training, inference) |
+| `docs/module1_readme.md` - `docs/module3_readme.md` | authentication, researcher desktop, hospital desktop |
+| `docs/module4_readme.md` - `docs/module8_readme.md`, `docs/module16_readme.md` | the ML modules (dataset, preprocessing, models, training, resource-aware training, inference) |
 
 ## 10. Status
 

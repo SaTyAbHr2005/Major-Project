@@ -16,7 +16,7 @@ EfficientNet-B0 - and every other model - always remains visible, per the
 project's add-on requirement, regardless of whether it was picked).
 
 These are RESOURCE/TRAINING-TIME alternatives, not accuracy rankings - see
-module8_readme.md. No text generated here claims accuracy superiority;
+docs/module8_readme.md. No text generated here claims accuracy superiority;
 wording is always built from the actual computed numbers for this machine
 and this dataset, never a canned string.
 """
