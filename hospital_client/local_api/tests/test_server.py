@@ -211,3 +211,13 @@ def test_train_validates_the_selection_before_starting_anything(api, tmp_path):
     assert call(train, "POST", {"architecture": "resnet18", "epochs": "10"})[0] == 400
     assert call(train, "POST", {"architecture": "resnet18", "batch_size": True})[0] == 400
     assert call(f"{api}/training-runs")[2] == {"runs": []}  # nothing was launched
+
+
+def test_runs_are_named_after_the_recommended_model(tmp_path):
+    recs = {"recommendations": [{"recommendation_type": "recommended", "model": "resnet50"},
+                                {"recommendation_type": "fast", "model": "../evil"}]}
+    (tmp_path / "recommendations.json").write_text(json.dumps(recs))
+    assert server._choice_architecture(str(tmp_path), "recommended") == "resnet50"
+    assert server._choice_architecture(str(tmp_path), "fast") is None          # unsafe value ignored
+    assert server._choice_architecture(str(tmp_path), "high_capacity") is None  # caller falls back to the choice
+    assert server._choice_architecture(str(tmp_path / "missing"), "recommended") is None

@@ -439,6 +439,13 @@ def r_recommend(h, m, q):
     return 202, job.to_dict()
 
 
+def _choice_architecture(d: str, choice: str):
+    """The model in this dataset's saved Module 8 recommendations for `choice`, or None."""
+    recs = _read_json(os.path.join(d, "recommendations.json")) or {}
+    arch = next((r.get("model") for r in recs.get("recommendations", []) if r.get("recommendation_type") == choice), None)
+    return arch if isinstance(arch, str) and ARCH_RE.match(arch) else None
+
+
 def r_train(h, m, q):
     dataset_id = m.group(1)
     m5 = _require_preprocessed(dataset_id)
@@ -459,14 +466,16 @@ def r_train(h, m, q):
                 selection_args += [flag, value]
         label = "manual" if body.get("batch_size") is not None or body.get("epochs") is not None else "alt"
         choice = f"{label}:{architecture}"
-        suffix = f"{label}_{architecture}"
+        model_name = architecture
     elif choice in CHOICES:
         selection_args = ["--choice", choice]
-        suffix = choice
+        # Name the run after the model Module 8 recommended for this choice (e.g. resnet50);
+        # the choice itself is kept in <model_id>_run.json.
+        model_name = _choice_architecture(dataset_dir(dataset_id), choice) or choice
     else:
         raise ApiError(400, f"Send choice (one of {sorted(CHOICES)}) or an architecture.")
     name = _read_json(os.path.join(dataset_dir(dataset_id), "source.json"))["name"]
-    model_id = f"{_slug(body.get('name') or name)}_{suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    model_id = f"{_slug(body.get('name') or name)}_{model_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     os.makedirs(TRAINED_DIR, exist_ok=True)
     meta = {"dataset_id": dataset_id, "dataset_name": name, "choice": choice, "model_id": model_id,
             "request_id": body.get("request_id") if isinstance(body.get("request_id"), str) else None,

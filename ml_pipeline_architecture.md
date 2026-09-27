@@ -992,6 +992,9 @@ python -m hospital_client.local_api              # ML_WORK_DIR (default ~/medfl_
 cd frontend && npm install && npm run dev        # frontend/.env: VITE_API_URL, VITE_ML_API_URL
 ```
 
+Each training run is saved under `ML_WORK_DIR/trained` as `<dataset>_<architecture>_<YYYYmmdd_HHMMSS>`
+(e.g. `cell_images_resnet50_20260927_165559`); which option was chosen is recorded in `<run>_run.json`.
+
 Tests: `hospital_client/local_api/tests` (auth, origin checks, input validation, real M4->M5 run
 on synthetic images, job lifecycle/cancel, temp-file cleanup) and
 `backend/tests/api/training_progress.test.js`.
