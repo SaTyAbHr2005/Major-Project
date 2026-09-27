@@ -45,10 +45,15 @@ def _channels_for(color_mode: str) -> int:
 def measure_real_resource_usage(
     architecture: str, num_classes: int, input_size: Tuple[int, int], color_mode: str,
     batch_size: int, device_type: str, precision: str, optimizer_name: str, learning_rate: float = 1e-3,
+    warmup_steps: int = 1, timed_steps: int = 2,
 ) -> DryRunMeasurement:
     """
-    Executes exactly one real training step (forward + backward +
-    optimizer.step) and measures actual peak memory and wall-clock time.
+    Executes real training steps (forward + backward + optimizer.step) and
+    measures actual peak memory (across every step) and the mean wall-clock
+    time of the timed steps. The untimed warm-up step absorbs one-off costs
+    (CUDA kernel loading, allocator growth) - on an RTX 3050 the first step of
+    MobileNetV2/EfficientNet-B0 took ~7s vs ~0.08-0.1s steady-state, which
+    previously inflated their time estimates ~70-100x.
     Raises RuntimeError (including a genuine CUDA OOM) exactly as a real
     Module 7 run would - the caller (evaluator.py) is responsible for
     catching a CUDA OOM here and trying a smaller batch size.
@@ -80,8 +85,8 @@ def measure_real_resource_usage(
         mem_before = process.memory_info().rss
 
     import time
-    started = time.perf_counter()
-    try:
+
+    def _step():
         optimizer.zero_grad()
         with torch.amp.autocast(device_type=device_type, dtype=torch.float16, enabled=autocast_enabled):
             outputs = model(images)
@@ -91,7 +96,14 @@ def measure_real_resource_usage(
         scaler.update()
         if device_type == "cuda":
             torch.cuda.synchronize(device)
-        elapsed = time.perf_counter() - started
+
+    try:
+        for _ in range(warmup_steps):
+            _step()
+        started = time.perf_counter()
+        for _ in range(max(1, timed_steps)):
+            _step()
+        elapsed = (time.perf_counter() - started) / max(1, timed_steps)
 
         if device_type == "cuda":
             peak_mb = torch.cuda.max_memory_allocated(device) / (1024 ** 2)

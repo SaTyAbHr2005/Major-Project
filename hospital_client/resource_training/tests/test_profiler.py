@@ -37,6 +37,31 @@ def test_repeated_measurement_does_not_leak_state():
         assert result.measured_total_mb > 0
 
 
+def test_slow_first_step_is_excluded_from_timing(monkeypatch):
+    # Regression: timing only the first step made MobileNetV2/EfficientNet
+    # look ~70-100x slower on CUDA (one-off kernel loading). Simulate a slow
+    # first forward pass and check it does not reach the measurement.
+    import time
+
+    class SlowFirstStep(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.fc = torch.nn.Linear(3 * 8 * 8, 2)
+            self.calls = 0
+
+        def forward(self, x):
+            self.calls += 1
+            if self.calls == 1:
+                time.sleep(0.5)
+            return self.fc(x.flatten(1))
+
+    model = SlowFirstStep()
+    monkeypatch.setattr("hospital_client.resource_training.profiler.build_model", lambda config: model)
+    result = measure_real_resource_usage("resnet18", 2, (8, 8), "RGB", 2, "cpu", "fp32", "adam")
+    assert model.calls == 3  # 1 warm-up + 2 timed
+    assert result.measured_seconds_per_batch < 0.25
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires a real CUDA device")
 def test_measures_real_vram_on_cuda():
     result = measure_real_resource_usage(

@@ -99,6 +99,12 @@ def format_duration(seconds: float) -> str:
     return f"{secs} second{'s' if secs != 1 else ''}"
 
 
+def format_budget(seconds: float) -> str:
+    """A time budget as an adjective phrase: '30-minute', '27-hour'."""
+    minutes = round(max(0.0, seconds) / 60.0)
+    return f"{minutes}-minute" if minutes < 120 else f"{round(minutes / 60)}-hour"
+
+
 def format_duration_range(seconds_min: float, seconds_max: float) -> str:
     """A range is always the honest representation of an estimate - a single
     number implies false precision. Collapses to a single value only when

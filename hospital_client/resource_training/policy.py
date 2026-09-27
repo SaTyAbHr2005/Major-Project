@@ -45,6 +45,12 @@ class ResourcePolicy:
         ResourceTier.MEDIUM_END.value: 45.0,
         ResourceTier.HIGH_END.value: 60.0,
     })
+    # The budgets above are per this many training images and scale up
+    # linearly beyond it. Every model's per-epoch time also grows linearly with
+    # the dataset, so this keeps the model choice independent of dataset size
+    # (a huge dataset must not push every model under the budget and collapse
+    # the choice to the lightest one) while the reported time stays honest.
+    time_budget_reference_samples: int = 25_000
 
     # --- Workers ---
     worker_candidates: List[int] = field(default_factory=lambda: [0, 2, 4])
@@ -172,6 +178,7 @@ class ResourcePolicy:
             "epoch_default": self.epoch_default,
             "epoch_max": self.epoch_max,
             "time_budget_minutes_by_tier": dict(self.time_budget_minutes_by_tier),
+            "time_budget_reference_samples": self.time_budget_reference_samples,
             "vram_tier_thresholds_mb": dict(self.vram_tier_thresholds_mb),
             "ram_tier_thresholds_mb": dict(self.ram_tier_thresholds_mb),
             "default_optimizer": self.default_optimizer,

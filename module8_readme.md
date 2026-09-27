@@ -47,7 +47,7 @@ hospital_client/resource_training/
 ├── runner.py                               # orchestrates: re-check -> monitor -> Trainer.run() -> adapt -> stats -> M9
 ├── statistics.py                            # ResourceStatistics (hardware+config+resource+estimation)
 ├── cli.py, __main__.py                       # `python -m hospital_client.resource_training ...`
-└── tests/                                     # 94 tests (simulated hardware tiers + real integration)
+└── tests/                                     # 105 tests (simulated hardware tiers + real integration)
 ```
 
 **Full pipeline** (this is the exact sequence `cli.py`'s `train` command and `runner.py` follow):
@@ -144,12 +144,19 @@ measurement:
    `pretrained=False`, no gradients) via Module 6's own `build_model()` + `count_parameters()`,
    and caches the real parameter count per `(architecture, num_classes, input_size, color_mode)`.
 2. **`profiler.py`** goes further: for the specific candidate batch size the heuristic pre-filter
-   says *might* fit, it runs one **real forward + backward + optimizer.step()** on this exact
+   says *might* fit, it runs **real forward + backward + optimizer.step()** calls on this exact
    machine - mirroring Module 7's own training step exactly (same `autocast`/`GradScaler` call
    pattern as `hospital_client.training.trainer.Trainer._run_epoch`) - using randomly generated
-   dummy tensors (never real training data). It measures the **actual** peak memory
-   (`torch.cuda.max_memory_allocated()` on CUDA, a process-RSS delta floored at the real
-   parameter+gradient footprint on CPU) and the **actual** wall-clock time for that one batch.
+   dummy tensors (never real training data): 1 untimed warm-up step, then 2 timed steps. It
+   measures the **actual** peak memory across all steps (`torch.cuda.max_memory_allocated()` on
+   CUDA, a process-RSS delta floored at the real parameter+gradient footprint on CPU) and the
+   **mean** wall-clock time of the timed steps.
+
+   The warm-up step matters: the first CUDA step carries one-off kernel-loading cost. Measured on
+   an RTX 3050 Laptop GPU (fp16, 224x224): MobileNetV2 7,320 ms first step vs ~76 ms
+   steady-state, EfficientNet-B0 7,075 ms vs ~97 ms, ResNet-18 475 ms vs ~117 ms. An earlier
+   version timed only the first step, which inflated MobileNet/EfficientNet time estimates
+   ~70-100x (EfficientNet-B0 was estimated at 5-8 hours instead of ~12-19 minutes).
 
 If the real measurement exceeds the safety budget even though the cheap heuristic pre-filter let
 it through, the evaluator steps down to the next smaller batch-size candidate and measures again
@@ -165,33 +172,65 @@ was `"measured": true` (real dry run) or a heuristic approximation.
 ## 8. The Three Recommendations (`recommender.py`)
 
 `generate_recommendations()` evaluates all 8 architectures and, when feasible ones exist, returns
-up to three:
+up to three options forming a **ladder around what this machine trains comfortably**:
 
 | Option | Purpose | Typical Trade-off |
 |---|---|---|
-| **Recommended** | Balanced resource usage and training capacity for *this* machine | Balanced time and resource consumption |
-| **High-Capacity / More Time** | Uses more of the available resources when safely feasible | Longer training and higher resource load |
-| **Fast / Lower Resource** | Minimizes training time/resource usage | Lower model/training capacity and potentially different experimental performance |
+| **Fast / Lower Resource** (or **Fast / Fewer Epochs**) | One step lighter than Recommended | Lower model capacity or fewer epochs, shorter training |
+| **Recommended** | The heaviest model tier *this* machine trains comfortably | Balanced time and resource consumption |
+| **High-Capacity / More Time** (or **More Epochs / ...**; either becomes **... / Not Recommended** when it does not fit the time budget) | One step heavier than Recommended | Longer training and higher resource load, stated as numbers: % of VRAM/RAM used, per-epoch time vs Recommended, epochs that fit |
 
 These are **resource/training-time alternatives, not accuracy rankings.** Module 8 never claims
 to know in advance which configuration will produce the best medical-imaging accuracy - that
 determination belongs to Module 20 (Research Experiments and Evaluation, §16).
 
-**Selection logic:**
-- **Fast** = the feasible architecture with the lowest estimated training time.
-- **High-Capacity** = the feasible architecture with the largest measured parameter count that
-  still safely fits (i.e. the strongest model the hardware can support, not a fixed model name).
-- **Recommended** = the model, from the remaining feasible pool, whose own project-defined
-  resource tier is closest to *this machine's own detected capability tier* (§6), tie-broken by
-  a capacity-vs-time balance score. This is what makes Recommended genuinely track the hardware:
-  a very constrained machine trends toward its lightest feasible tier, a very strong machine
-  trends toward a heavier one - it is not a static param-count ranking.
+**Selection logic** (nothing refers to a specific GPU; only measured memory/time and Module 6's
+model tiers are used):
+- **Recommended** = the feasible model from the **heaviest Module 6 resource tier that trains
+  comfortably** on this machine - "comfortably" meaning it still gets the full
+  `policy.epoch_default` epochs inside the machine's time budget (§10; the evaluator cuts epochs
+  for models too slow to fit). Ties within a tier are broken by a capacity-vs-time balance
+  score. If no model is comfortable (e.g. CPU-only training), Recommended falls back to the model
+  that fits the most epochs, fastest first - never the heaviest - and a note says so.
+- **Fast** = one step lighter: the fastest model of the nearest lighter tier (that is actually
+  faster than Recommended); else a faster model of the same tier; else the **Recommended model
+  with half the epochs** (never below `epoch_min`).
+- **High-Capacity** = one step heavier: the largest model of the nearest heavier tier; else a
+  larger model of the same tier; else the **Recommended model with twice the epochs** (never
+  above `epoch_max`). Labelled **Not Recommended** when it cannot train its default epochs in the
+  time budget (or, for the more-epochs variant, exceeds the budget).
+- Epoch variants reuse the Recommended model's measured memory and batch size; their time range
+  is rescaled exactly (the estimate is linear in epochs plus one fixed overhead). If even a
+  variant is impossible (already at `epoch_min`/`epoch_max`) that option is omitted with a note.
 
-**Honesty about fewer than three.** If only 1 or 2 architectures are genuinely feasible, Module 8
-returns that many recommendations plus an explanatory note in `RecommendationSet.notes` - it
-**never invents an unsafe third option** to pad the count. If zero architectures are feasible,
-it returns an empty list with a note, and every `ModelAssessment.status_label` is set to
-`"Unsafe"`.
+*Real example (RTX 3050 Laptop, 4 GB, malaria dataset, 22,865 training images, real dry runs):*
+Fast = ResNet-18 (low tier, 10 epochs, 6.6-10.3 min), Recommended = ResNet-50 (medium tier, 10
+epochs, ~46% of VRAM, 16.5-26.0 min), High-Capacity / Not Recommended = ViT-B/16 (high tier,
+~70% of VRAM, each epoch ~3.0x as long, only 4 epochs fit in the 30-minute budget).
+
+*Simulated machines (heuristic estimates, GPU speed assumed 1x/2x/4x of an RTX 3050 - on real
+hardware the dry run measures it):*
+
+| Machine | Fast | Recommended | High-Capacity |
+|---|---|---|---|
+| CPU only, 8 GB RAM | MobileViT-XXS, fewer epochs | MobileViT-XXS (very low) | ResNet-18 (low) - Not Recommended |
+| 4 GB GPU | MobileNetV2 (low) | EfficientNet-B0 (medium) | ViT-B/16 (high) - Not Recommended |
+| 8 GB GPU (2x speed) | MobileNetV2 (low) | EfficientNet-B0 (medium) | ViT-B/16 (high) - Not Recommended |
+| 16 GB GPU (4x speed) | EfficientNet-B0 (medium) | EfficientNet-B4 (high) | ViT-B/16 (high, larger) - Not Recommended |
+
+The same table at 2,000,000 training images picks exactly the same models (only the times grow)
+- see "Dataset size" in §10.
+- Unpicked feasible models are labelled **`High Load`** when they cannot train the default
+  epochs in the time budget (the reason states % of memory used, estimated time and epochs that
+  fit), otherwise **`Suitable`**.
+- The machine's own capability tier (§6) is **not** matched against model tiers; it only sets
+  the time budget.
+
+**Honesty about fewer than three architectures.** If only 1 or 2 architectures are genuinely
+feasible, the missing rungs are filled only with **epoch variants of a feasible model** (same
+memory, same batch size), each explained in `RecommendationSet.notes` - Module 8 **never invents
+an unsafe option** to pad the count. If zero architectures are feasible, it returns an empty list
+with a note, and every `ModelAssessment.status_label` is set to `"Unsafe"`.
 
 Every `RecommendedConfig` carries a `reason` and a `tradeoff` string **generated from the actual
 computed numbers for this machine and this dataset** (never a canned template) - e.g. "Measured
@@ -209,15 +248,15 @@ EfficientNet-B0 is already Module 6's initial primary architecture and is treate
 important project reference model here too - but it is **never forced** into an unsafe or
 inappropriate slot. `ResourceEvaluator.evaluate_all()` always assesses it (alongside the other
 7 architectures), and `recommender.py` always assigns it a `status_label`
-(`Recommended` / `High-Capacity` / `Fast` / `Suitable` / `High Load` / `Unsafe`) with a dynamic
+(`Recommended` / `High-Capacity` / `Not Recommended` / `Fast` / `Suitable` / `High Load` / `Unsafe`) with a dynamic
 reason, **regardless of whether it was actually picked** - so it always remains visible in
 `RecommendationSet.all_model_assessments["efficientnet_b0"]`.
 
 Its role changes with the detected hardware and dataset, exactly as the project intends:
 - On very constrained hardware, it may be feasible but labeled `"High Load"` or `"Suitable"`
   rather than picked, because lighter architectures dominate Fast/Recommended.
-- On hardware/dataset combinations where it is the best balance for that machine's tier, it
-  becomes `"Recommended"`.
+- On hardware/dataset combinations where it is the best-balanced comfortable model of the
+  heaviest comfortable tier, it becomes `"Recommended"`.
 - If no lighter architecture is feasible and it is the strongest one that still fits, it becomes
   `"High-Capacity"`.
 - If it is ever genuinely infeasible under the configured safety margins, it is labeled
@@ -239,6 +278,14 @@ when the numbers favor it, and that it is correctly excluded when unsafe).
   that model's per-epoch cost is high; a weak machine running a light model can still receive a
   meaningful epoch count if it trains quickly. Module 7's own early stopping (`--early-stopping`)
   remains available and unaffected once a `TrainingConfig` is resolved.
+- **Dataset size** (`policy.time_budget_reference_samples`, default 25,000): the tier budgets
+  (20/30/45/60 minutes) apply per 25,000 training images and scale linearly above that (a
+  2,000,000-image dataset on a low-end GPU gets an 80x budget, ~40 hours). Every model's
+  per-epoch time also grows linearly with the dataset, so which models are "comfortable" - and
+  therefore the recommendation - does **not** drift toward the lightest model just because the
+  dataset is large; only the reported training time grows, honestly. The scaled budget is
+  stored on every `ModelAssessment.time_budget_seconds`. Datasets at or below 25,000 images keep
+  the unscaled budget.
 - **Precision**: `fp16` is only ever offered when the selected device is CUDA
   (`policy.prefer_fp16_on_cuda`); CPU configurations always resolve to `fp32` - consistent with
   Module 7's own `precision` validation, which rejects `fp16` on CPU.
@@ -462,12 +509,13 @@ utilization monitoring as approximation-only limitations. All three have since b
 real local measurements (§7, §11, §12). What remains genuinely unresolved:
 
 - **Real dry-run measurement is still an approximation of a full training run**, not a
-  substitute for one. A single forward+backward+optimizer-step captures memory and per-batch
-  timing accurately, but not effects that only appear over a full epoch (VRAM fragmentation
-  across the dataset, DataLoader worker warm-up, disk I/O variance, thermal throttling on
-  sustained load). This is exactly why the time estimate is always a *range*, and why
-  `measured_hardware_estimate` (real full-run history) is preferred over `dry_run_estimate` once
-  it exists.
+  substitute for one. A few forward+backward+optimizer-steps on in-memory tensors capture memory
+  and GPU compute time, but not image decoding/loading from disk or effects that only appear
+  over a full epoch (VRAM fragmentation, DataLoader worker warm-up, disk I/O variance, thermal
+  throttling). In practice this makes `dry_run_estimate` **optimistic** when data loading is the
+  bottleneck: on the malaria dataset (RTX 3050, 4 workers) ResNet-18 was estimated at 6.6-10.3
+  minutes and a real Module 7 run took ~13-15 minutes. This is why `measured_hardware_estimate`
+  (real full-run history, recorded by `train`) is preferred once it exists.
 - **The fixed per-run overhead constant (`policy.fixed_overhead_seconds`, default 20s) is a
   single configured number, not measured per-dataset-size.** It was calibrated against one real
   observation on this development machine (a tiny 25-sample run) and is deliberately
@@ -490,7 +538,7 @@ real local measurements (§7, §11, §12). What remains genuinely unresolved:
   future telemetry purposes only, not a full connectivity/bandwidth test, and this is intentional
   scope, not an unresolved gap.
 - **Real dry-run measurement adds real (bounded) latency to `generate_recommendations()`** - up
-  to one real training step per architecture (8 total, occasionally more if a heuristic
+  to three real training steps (1 warm-up + 2 timed) per architecture (occasionally more if a heuristic
   pre-filter pass turns out to be optimistic and a smaller candidate must be measured too). This
   is an accepted, documented trade-off for real numbers instead of pure heuristics; the shared
   test fixture (`policy.enable_dry_run_measurement=False`) is used to keep pure decision-logic

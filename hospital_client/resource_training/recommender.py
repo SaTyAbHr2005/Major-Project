@@ -1,8 +1,17 @@
 """
 Generates up to three dynamically-computed training-configuration
-recommendations (Recommended / High-Capacity-More-Time / Fast-Lower-
-Resource) from a ResourceEvaluator's per-model assessments, plus a
-role/status label for every one of Module 6's 8 architectures (so
+recommendations from a ResourceEvaluator's per-model assessments, as a
+ladder around what THIS machine trains comfortably:
+
+  Fast        - one step lighter (the fastest model of the nearest lighter
+                tier), or the Recommended model with fewer epochs
+  Recommended - the heaviest model tier that still trains the full default
+                epochs within the machine's (dataset-scaled) time budget
+  High-Cap.   - one step heavier (the largest model of the nearest heavier
+                tier), or the Recommended model with more epochs; labelled
+                "Not Recommended" with its costs when it does not fit the budget
+
+plus a role/status label for every one of Module 6's 8 architectures (so
 EfficientNet-B0 - and every other model - always remains visible, per the
 project's add-on requirement, regardless of whether it was picked).
 
@@ -11,11 +20,11 @@ module8_readme.md. No text generated here claims accuracy superiority;
 wording is always built from the actual computed numbers for this machine
 and this dataset, never a canned string.
 """
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 from hospital_client.resource_training.dataset_characteristics import DatasetCharacteristics
-from hospital_client.resource_training.estimator import HistoricalThroughputStore
+from hospital_client.resource_training.estimator import HistoricalThroughputStore, format_budget, format_duration_range
 from hospital_client.resource_training.evaluator import ModelAssessment, ResourceEvaluator
 from hospital_client.resource_training.policy import ResourcePolicy
 from hospital_client.resource_training.resource_profile import ResourceProfile
@@ -27,6 +36,9 @@ HIGH_CAPACITY = "high_capacity"
 FAST = "fast"
 
 _LABELS = {RECOMMENDED: "Recommended", HIGH_CAPACITY: "High-Capacity / More Time", FAST: "Fast / Lower Resource"}
+_NOT_RECOMMENDED_LABEL = "High-Capacity / Not Recommended"
+_FEWER_EPOCHS_LABEL = "Fast / Fewer Epochs"
+_MORE_EPOCHS_LABELS = ("More Epochs / More Time", "More Epochs / Not Recommended")
 
 
 @dataclass
@@ -95,6 +107,69 @@ class RecommendationSet:
         }
 
 
+def _seconds(a: ModelAssessment) -> float:
+    return (a.time_estimate or {}).get("estimated_training_time_seconds", 0.0)
+
+
+def _time_display(a: ModelAssessment) -> str:
+    return (a.time_estimate or {}).get("estimated_training_time_display", "an unknown duration")
+
+
+def _tier(a: ModelAssessment) -> int:
+    return _TIER_ORDINAL.get(a.resource_tier, 2)
+
+
+def _tier_name(a: ModelAssessment) -> str:
+    return a.resource_tier.replace("_", " ")
+
+
+def _per_epoch_ratio(a: ModelAssessment, b: ModelAssessment) -> Optional[float]:
+    """How many times longer one epoch of `a` takes than one epoch of `b`."""
+    if not (a.epochs and b.epochs and _seconds(a) > 0 and _seconds(b) > 0):
+        return None
+    return (_seconds(a) / a.epochs) / (_seconds(b) / b.epochs)
+
+
+def _memory_pct(a: ModelAssessment) -> Optional[float]:
+    total = (a.memory_estimate or {}).get("estimated_total_mb")
+    if total is None or not a.available_memory_mb:
+        return None
+    return 100.0 * total / a.available_memory_mb
+
+
+def _memory_phrase(a: ModelAssessment) -> str:
+    pct = _memory_pct(a)
+    kind = "VRAM" if a.device == "cuda" else "RAM"
+    return f"~{pct:.0f}% of available {kind}" if pct is not None else f"an unknown share of available {kind}"
+
+
+def _is_comfortable(a: ModelAssessment, policy: ResourcePolicy) -> bool:
+    """
+    Feasible AND trains the full default epoch count within this machine's
+    time budget. The evaluator already cuts epochs to fit the budget, so a
+    model left with fewer than the default epochs is one this machine can run
+    but only by training it less.
+    """
+    return a.feasible and (a.epochs or 0) >= min(policy.epoch_default, policy.epoch_max)
+
+
+def _with_epochs(a: ModelAssessment, epochs: int, policy: ResourcePolicy) -> ModelAssessment:
+    """
+    The same model/batch/memory at a different epoch count. The estimator is
+    linear in epochs plus one fixed per-run overhead, so the range scales exactly.
+    """
+    t = dict(a.time_estimate or {})
+    overhead, k = policy.fixed_overhead_seconds, epochs / a.epochs
+    for key in ("estimated_training_time_seconds", "estimated_training_time_seconds_min", "estimated_training_time_seconds_max"):
+        if key in t:
+            t[key] = overhead + (t[key] - overhead) * k
+            t[key.replace("seconds", "minutes")] = t[key] / 60.0
+    t["estimated_training_time_display"] = format_duration_range(
+        t.get("estimated_training_time_seconds_min", 0.0), t.get("estimated_training_time_seconds_max", 0.0)
+    )
+    return replace(a, epochs=epochs, time_estimate=t)
+
+
 def _resource_summary(a: ModelAssessment) -> str:
     mem = a.memory_estimate or {}
     total = mem.get("estimated_total_mb")
@@ -104,14 +179,14 @@ def _resource_summary(a: ModelAssessment) -> str:
     basis = "measured (real local dry run)" if mem.get("measured") else "estimated"
     return (
         f"{basis.capitalize()} peak {kind}: approximately {total / 1024.0:.2f} GB of "
-        f"{a.available_memory_mb / 1024.0:.2f} GB available."
+        f"{a.available_memory_mb / 1024.0:.2f} GB available (~{_memory_pct(a):.0f}%)."
     )
 
 
-def _config_from_assessment(recommendation_type: str, a: ModelAssessment, reason: str, tradeoff: str) -> RecommendedConfig:
+def _config_from_assessment(recommendation_type: str, a: ModelAssessment, reason: str, tradeoff: str, label: Optional[str] = None) -> RecommendedConfig:
     t = a.time_estimate or {}
     return RecommendedConfig(
-        recommendation_type=recommendation_type, label=_LABELS[recommendation_type],
+        recommendation_type=recommendation_type, label=label or _LABELS[recommendation_type],
         architecture=a.architecture, display_name=a.display_name, device=a.device, precision=a.precision,
         batch_size=a.batch_size, epochs=a.epochs, num_workers=a.num_workers,
         estimated_training_time_seconds=t.get("estimated_training_time_seconds", 0.0),
@@ -127,12 +202,21 @@ def _config_from_assessment(recommendation_type: str, a: ModelAssessment, reason
     )
 
 
-def _recommended_reason(a: ModelAssessment) -> str:
-    t = a.time_estimate or {}
+# ---------------------------------------------------------------------------
+# Generated text (always built from this machine's numbers)
+# ---------------------------------------------------------------------------
+
+def _recommended_reason(a: ModelAssessment, comfortable: bool, budget: str) -> str:
+    if comfortable:
+        return (
+            f"Recommended: {a.display_name} is from the heaviest model tier ({_tier_name(a)}) that still trains "
+            f"the full {a.epochs} epochs within this machine's {budget} time budget - estimated {_time_display(a)}, "
+            f"using {_memory_phrase(a)}."
+        )
     return (
-        f"Recommended balanced configuration: {a.display_name} provides a balanced model capacity and training "
-        f"budget for the detected hardware, keeping estimated resource usage comfortably within the configured "
-        f"safety margin and an estimated training time of approximately {t.get('estimated_training_time_display', 'an unknown duration')}."
+        f"Recommended: no architecture trains the full default epochs within this machine's {budget} time "
+        f"budget, so {a.display_name} was chosen because it fits the most epochs at the lowest cost - estimated "
+        f"{_time_display(a)} for {a.epochs} epochs, using {_memory_phrase(a)}."
     )
 
 
@@ -143,68 +227,106 @@ def _recommended_tradeoff(a: ModelAssessment) -> str:
     )
 
 
-def _high_capacity_reason(a: ModelAssessment) -> str:
-    t = a.time_estimate or {}
-    mem = a.memory_estimate or {}
+def _fast_reason(a: ModelAssessment, rec: ModelAssessment, variant: bool) -> str:
+    if variant:
+        return (
+            f"Fast option: the Recommended model ({a.display_name}) with fewer epochs ({a.epochs} instead of "
+            f"{rec.epochs}), estimated {_time_display(a)} instead of {_time_display(rec)}. No lighter architecture "
+            f"that trains faster is feasible on this machine."
+        )
+    ratio = _per_epoch_ratio(rec, a)
+    speed = f" - each epoch ~{ratio:.1f}x faster than Recommended" if ratio else ""
     return (
-        f"Uses {a.display_name} ({a.param_count:,} parameters), the highest-capacity architecture that still safely "
-        f"fits the detected hardware. Estimated to use ~{mem.get('estimated_total_mb', 0.0) / 1024.0:.2f} GB and take "
-        f"approximately {t.get('estimated_training_time_display', 'an unknown duration')} - more than the recommended option."
+        f"Fast option, one step lighter than Recommended: {a.display_name} ({_tier_name(a)} tier) is estimated at "
+        f"{_time_display(a)} for {a.epochs} epochs{speed}, using {_memory_phrase(a)}."
     )
 
 
-def _high_capacity_tradeoff(a: ModelAssessment) -> str:
+def _fast_tradeoff(variant: bool) -> str:
+    if variant:
+        return (
+            "Same model capacity with a shorter training budget; fewer epochs may give lower experimental "
+            "performance - actual performance must be measured on the target dataset."
+        )
+    return (
+        "Lower model capacity and a shorter training time than Recommended; may provide lower experimental "
+        "performance, but actual performance must be measured on the target dataset."
+    )
+
+
+def _high_reason(a: ModelAssessment, rec: ModelAssessment, variant: bool, not_recommended: bool, budget: str) -> str:
+    if variant:
+        text = (
+            f"The Recommended model ({a.display_name}) trained for more epochs ({a.epochs} instead of "
+            f"{rec.epochs}), estimated {_time_display(a)}. No heavier architecture fits this machine"
+        )
+        if not_recommended:
+            return text + f"; it exceeds the {budget} time budget, so it is not recommended as the default."
+        return text + "; it still fits the time budget but takes longer."
+
+    text = (
+        f"{a.display_name} ({a.param_count:,} parameters, {_tier_name(a)} tier) is one step heavier than "
+        f"Recommended: it uses {_memory_phrase(a)} and is estimated at {_time_display(a)}"
+    )
+    ratio = _per_epoch_ratio(a, rec)
+    if ratio:
+        # Per epoch: totals are both capped by the same time budget, so they hide the real cost difference.
+        text += f" (each epoch takes ~{ratio:.1f}x as long as the Recommended option)"
+    if not_recommended:
+        return text + (
+            f". It can run, but it is not recommended as the default: only {a.epochs} epochs fit in the "
+            f"{budget} time budget, so it spends more time and resources while training for fewer epochs."
+        )
+    return text + ". It fits the time budget but places a heavier load on this machine than the Recommended option."
+
+
+def _high_tradeoff(variant: bool) -> str:
+    if variant:
+        return (
+            "Longer training for the same model; more epochs are not a guarantee of higher accuracy - actual "
+            "performance must be evaluated on the target dataset."
+        )
     return (
         "Higher computational load and longer estimated training time than the recommended option. Higher model "
         "capacity is not a guarantee of higher accuracy - actual performance must be evaluated on the target dataset."
     )
 
 
-def _fast_reason(a: ModelAssessment) -> str:
-    t = a.time_estimate or {}
-    return (
-        f"Fastest feasible option: {a.display_name} minimizes estimated training time (~"
-        f"{t.get('estimated_training_time_display', 'an unknown duration')}) and resource usage among the safely "
-        f"feasible architectures on this machine."
-    )
-
-
-def _fast_tradeoff(a: ModelAssessment) -> str:
-    return (
-        "Lower model capacity and a shorter training budget than the other options; may provide lower experimental "
-        "performance, but actual performance must be measured on the target dataset."
-    )
-
-
 def _balance_score(a: ModelAssessment, min_p: float, max_p: float, min_t: float, max_t: float, weight: float) -> float:
     norm_capacity = 0.5 if max_p == min_p else (a.param_count - min_p) / (max_p - min_p)
-    seconds = (a.time_estimate or {}).get("estimated_training_time_seconds", 0.0)
-    norm_time = 0.5 if max_t == min_t else (seconds - min_t) / (max_t - min_t)
+    norm_time = 0.5 if max_t == min_t else (_seconds(a) - min_t) / (max_t - min_t)
     return norm_capacity - weight * norm_time
 
 
-def _label_unpicked(a: ModelAssessment, feasible: Dict[str, ModelAssessment]) -> None:
+def _label_unpicked(a: ModelAssessment, policy: ResourcePolicy, budget: str) -> None:
     if not a.feasible:
         a.status_label = "Unsafe"
         return
-    times = sorted((x.time_estimate or {}).get("estimated_training_time_seconds", 0.0) for x in feasible.values())
-    median = times[len(times) // 2]
-    seconds = (a.time_estimate or {}).get("estimated_training_time_seconds", 0.0)
-    if seconds > median:
+    if not _is_comfortable(a, policy):
         a.status_label = "High Load"
         a.reason = (
-            f"{a.display_name} is technically feasible under the current policy, but it is not the primary "
-            f"recommendation because it would place a relatively high load on the available resources and take "
-            f"approximately {(a.time_estimate or {}).get('estimated_training_time_display', 'longer')} compared with "
-            f"the selected alternatives."
+            f"{a.display_name} can run on this machine but is not recommended: it uses {_memory_phrase(a)}, is "
+            f"estimated at {_time_display(a)}, and only {a.epochs} epochs fit in the {budget} time budget."
         )
     else:
         a.status_label = "Suitable"
         a.reason = (
-            f"{a.display_name} is a suitable feasible alternative on this machine (estimated "
-            f"{(a.time_estimate or {}).get('estimated_training_time_display', 'an unknown duration')}), but was not "
-            f"selected as the Recommended, High-Capacity, or Fast option for this run."
+            f"{a.display_name} is a suitable feasible alternative on this machine (estimated {_time_display(a)}, "
+            f"using {_memory_phrase(a)}), but was not selected as the Recommended, High-Capacity, or Fast option "
+            f"for this run."
         )
+
+
+# ---------------------------------------------------------------------------
+# Selection
+# ---------------------------------------------------------------------------
+
+def _nearest_tier(candidates: List[ModelAssessment], below: bool) -> List[ModelAssessment]:
+    """The candidates from the tier closest to Recommended's (highest tier below it, or lowest above it)."""
+    if not candidates:
+        return []
+    target = max(map(_tier, candidates)) if below else min(map(_tier, candidates))
+    return [a for a in candidates if _tier(a) == target]
 
 
 def generate_recommendations(
@@ -237,63 +359,85 @@ def select_recommendations(
             assessment.status_label = "Unsafe"
         return RecommendationSet([], assessments, notes)
 
+    # The evaluator stores the dataset-scaled budget on every feasible assessment;
+    # hand-built assessments without one fall back to the unscaled tier budget.
+    budget_seconds = next((a.time_budget_seconds for a in feasible.values() if a.time_budget_seconds), None) or (
+        policy.time_budget_minutes_by_tier.get(hardware_tier, policy.time_budget_minutes_by_tier["medium_end"]) * 60.0
+    )
+    budget = format_budget(budget_seconds)
+
     param_counts = [a.param_count for a in feasible.values()]
-    times = [(a.time_estimate or {}).get("estimated_training_time_seconds", 0.0) for a in feasible.values()]
+    times = [_seconds(a) for a in feasible.values()]
     min_p, max_p, min_t, max_t = min(param_counts), max(param_counts), min(times), max(times)
 
-    fast_pick = min(feasible.values(), key=lambda a: (a.time_estimate or {}).get("estimated_training_time_seconds", 0.0))
-    high_pick = max(feasible.values(), key=lambda a: a.param_count)
+    def balance(a: ModelAssessment) -> float:
+        return _balance_score(a, min_p, max_p, min_t, max_t, policy.time_penalty_weight)
 
-    recommendations: List[RecommendedConfig] = []
-    picked_roles: Dict[str, str] = {}
-
-    if len(feasible) >= 3:
-        remaining = {k: v for k, v in feasible.items() if k not in (fast_pick.architecture, high_pick.architecture)}
-        pool = remaining if remaining else feasible
-        # "Balanced" is relative to THIS machine's own capability tier (not a
-        # fixed param-count ranking) - a weak machine's balanced pick should
-        # trend toward a lighter architecture, a strong machine's toward a
-        # heavier one (spec §7). Distance to the machine's tier wins first;
-        # the capacity/time balance score only breaks ties within that.
-        target_ordinal = _TIER_ORDINAL.get(hardware_tier, 2)
-        recommended_pick = min(
-            pool.values(),
-            key=lambda a: (
-                abs(_TIER_ORDINAL.get(a.resource_tier, 2) - target_ordinal),
-                -_balance_score(a, min_p, max_p, min_t, max_t, policy.time_penalty_weight),
-            ),
-        )
-        recommendations.append(_config_from_assessment(RECOMMENDED, recommended_pick, _recommended_reason(recommended_pick), _recommended_tradeoff(recommended_pick)))
-        recommendations.append(_config_from_assessment(HIGH_CAPACITY, high_pick, _high_capacity_reason(high_pick), _high_capacity_tradeoff(high_pick)))
-        recommendations.append(_config_from_assessment(FAST, fast_pick, _fast_reason(fast_pick), _fast_tradeoff(fast_pick)))
-        picked_roles = {recommended_pick.architecture: RECOMMENDED, high_pick.architecture: HIGH_CAPACITY, fast_pick.architecture: FAST}
-
-    elif len(feasible) == 2:
-        recommendations.append(_config_from_assessment(FAST, fast_pick, _fast_reason(fast_pick), _fast_tradeoff(fast_pick)))
-        recommendations.append(_config_from_assessment(HIGH_CAPACITY, high_pick, _high_capacity_reason(high_pick), _high_capacity_tradeoff(high_pick)))
-        picked_roles = {fast_pick.architecture: FAST, high_pick.architecture: HIGH_CAPACITY}
+    # 1. Recommended: the heaviest tier trained comfortably; balance breaks ties within the tier.
+    comfortable = [a for a in feasible.values() if _is_comfortable(a, policy)]
+    if comfortable:
+        rec = max(comfortable, key=lambda a: (_tier(a), balance(a)))
+    else:
+        # Nothing fits: a capacity-weighted pick would favour the heaviest (slowest) model, the
+        # opposite of what an overloaded machine needs - take the most epochs, then the fastest.
+        rec = max(feasible.values(), key=lambda a: (a.epochs or 0, -_seconds(a)))
         notes.append(
-            "Only 2 feasible architectures were found on this hardware; a distinct third (Recommended) option was "
-            "not generated because it would not meaningfully differ from Fast or High-Capacity. See "
-            "all_model_assessments for the full per-architecture evaluation."
+            f"No architecture trains the default {policy.epoch_default} epochs within this machine's {budget} time "
+            f"budget; Recommended falls back to the model that fits the most epochs, fastest first."
         )
+    others = [a for a in feasible.values() if a.architecture != rec.architecture]
 
-    else:  # exactly 1 feasible
-        only = next(iter(feasible.values()))
-        recommendations.append(_config_from_assessment(RECOMMENDED, only, _recommended_reason(only), _recommended_tradeoff(only)))
-        picked_roles = {only.architecture: RECOMMENDED}
-        notes.append(
-            "Only 1 feasible architecture was found on this hardware; High-Capacity and Fast alternatives were not "
-            "generated because no other architecture safely fits the detected resources within the configured "
-            "safety margins."
-        )
+    # 2. Fast: one step lighter - nearest lighter tier, else a faster model of the same tier, else fewer epochs.
+    lighter = _nearest_tier([a for a in others if _tier(a) < _tier(rec) and _seconds(a) < _seconds(rec)], below=True) or [
+        a for a in others if _tier(a) == _tier(rec) and _seconds(a) < _seconds(rec)
+    ]
+    fast, fast_variant = None, False
+    if lighter:
+        fast = min(lighter, key=_seconds)
+    elif rec.epochs and rec.epochs > policy.epoch_min:
+        fast, fast_variant = _with_epochs(rec, max(policy.epoch_min, rec.epochs // 2), policy), True
+        notes.append("No lighter architecture trains faster on this machine; Fast is the Recommended model with fewer epochs.")
+    else:
+        notes.append("No faster alternative exists: no lighter architecture is faster and Recommended is already at the minimum epochs.")
 
+    # 3. High-Capacity: one step heavier - nearest heavier tier, else a larger model of the same tier, else more epochs.
+    heavier = _nearest_tier([a for a in others if _tier(a) > _tier(rec)], below=False) or [
+        a for a in others if _tier(a) == _tier(rec) and a.param_count > rec.param_count
+    ]
+    high, high_variant = None, False
+    if heavier:
+        high = max(heavier, key=lambda a: a.param_count)
+    elif rec.epochs and rec.epochs < policy.epoch_max:
+        high, high_variant = _with_epochs(rec, min(policy.epoch_max, rec.epochs * 2), policy), True
+        notes.append("No heavier architecture fits this machine; High-Capacity is the Recommended model with more epochs.")
+    else:
+        notes.append("No heavier alternative exists: no larger architecture fits and Recommended is already at the maximum epochs.")
+
+    recommendations = [
+        _config_from_assessment(RECOMMENDED, rec, _recommended_reason(rec, bool(comfortable), budget), _recommended_tradeoff(rec)),
+    ]
+    high_not_recommended = False
+    if high is not None:
+        high_not_recommended = not _is_comfortable(high, policy) or _seconds(high) > budget_seconds
+        label = _MORE_EPOCHS_LABELS[high_not_recommended] if high_variant else (_NOT_RECOMMENDED_LABEL if high_not_recommended else None)
+        recommendations.append(_config_from_assessment(
+            HIGH_CAPACITY, high, _high_reason(high, rec, high_variant, high_not_recommended, budget), _high_tradeoff(high_variant), label=label,
+        ))
+    if fast is not None:
+        recommendations.append(_config_from_assessment(
+            FAST, fast, _fast_reason(fast, rec, fast_variant), _fast_tradeoff(fast_variant), label=_FEWER_EPOCHS_LABEL if fast_variant else None,
+        ))
+
+    # Per-architecture labels. Epoch variants reuse the Recommended architecture, which keeps its own label.
+    picked = {rec.architecture: (RECOMMENDED, "Recommended")}
+    if high is not None and not high_variant:
+        picked[high.architecture] = (HIGH_CAPACITY, "Not Recommended" if high_not_recommended else "High-Capacity")
+    if fast is not None and not fast_variant:
+        picked[fast.architecture] = (FAST, "Fast")
     for arch, assessment in assessments.items():
-        if arch in picked_roles:
-            role = picked_roles[arch]
-            assessment.role = role
-            assessment.status_label = _LABELS[role].split(" /")[0] if role != RECOMMENDED else "Recommended"
+        if arch in picked:
+            assessment.role, assessment.status_label = picked[arch]
         else:
-            _label_unpicked(assessment, feasible)
+            _label_unpicked(assessment, policy, budget)
 
     return RecommendationSet(recommendations, assessments, notes)

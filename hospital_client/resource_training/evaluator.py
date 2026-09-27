@@ -14,7 +14,7 @@ import torch
 from hospital_client.model_management.registry import ARCHITECTURE_CATALOG, ResourceTier
 from hospital_client.resource_training.dataset_characteristics import DatasetCharacteristics
 from hospital_client.resource_training.estimator import (
-    HistoricalThroughputStore, estimate_memory_mb, estimate_training_time,
+    HistoricalThroughputStore, estimate_memory_mb, estimate_training_time, format_budget,
 )
 from hospital_client.resource_training.model_profiles import measure_model_profile
 from hospital_client.resource_training.policy import ResourcePolicy
@@ -52,6 +52,13 @@ def classify_hardware_tier(profile: ResourceProfile, device_type: str, policy: R
         if available >= thresholds.get(name, 0.0):
             tier = name
     return tier
+
+
+def time_budget_seconds(policy: ResourcePolicy, hardware_tier: str, num_train_samples: int) -> float:
+    """The machine tier's time budget, scaled linearly for datasets larger than policy.time_budget_reference_samples."""
+    minutes = policy.time_budget_minutes_by_tier.get(hardware_tier, policy.time_budget_minutes_by_tier[ResourceTier.MEDIUM_END.value])
+    scale = max(1.0, num_train_samples / max(1, policy.time_budget_reference_samples))
+    return minutes * 60.0 * scale
 
 
 def _usable_memory_mb(profile: ResourceProfile, device_type: str, policy: ResourcePolicy) -> Optional[float]:
@@ -96,6 +103,7 @@ class ModelAssessment:
     reason: str
     status_label: str = "Unassigned"  # set by recommender.py relative to the 3 picks
     role: Optional[str] = None        # "recommended" | "high_capacity" | "fast" | None, set by recommender.py
+    time_budget_seconds: Optional[float] = None  # the (dataset-scaled) budget epochs were fitted to
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -118,6 +126,7 @@ class ModelAssessment:
             "reason": self.reason,
             "status_label": self.status_label,
             "role": self.role,
+            "time_budget_seconds": self.time_budget_seconds,
         }
 
 
@@ -211,17 +220,16 @@ class ResourceEvaluator:
             dataset.num_validation_samples, chosen_batch_size, 1, self.device_type, precision, policy,
             self.history, device_key=self._device_key(), measured_seconds_per_batch=dry_run_seconds_per_batch,
         )
-        budget_minutes = policy.time_budget_minutes_by_tier.get(self.hardware_tier, policy.time_budget_minutes_by_tier[ResourceTier.MEDIUM_END.value])
-        budget_seconds = budget_minutes * 60.0
+        budget_seconds = time_budget_seconds(policy, self.hardware_tier, dataset.num_train_samples)
         per_epoch_seconds = max(one_epoch.estimated_training_time_seconds, 0.001)
         max_epochs_in_budget = max(1, int(budget_seconds // per_epoch_seconds))
         epochs = max(policy.epoch_min, min(policy.epoch_default, max_epochs_in_budget))
         epochs = max(policy.epoch_min, min(policy.epoch_max, epochs))
 
         epoch_reason = (
-            f"epochs={epochs} selected to stay within the {self.hardware_tier.replace('_', ' ')} time budget of "
-            f"{budget_minutes:.0f} minutes at an estimated ~{per_epoch_seconds:.1f}s/epoch (bounded to "
-            f"[{policy.epoch_min}, {policy.epoch_max}])."
+            f"epochs={epochs} selected to stay within the {self.hardware_tier.replace('_', ' ')} {format_budget(budget_seconds)} "
+            f"time budget for {dataset.num_train_samples:,} training images at an estimated "
+            f"~{per_epoch_seconds:.1f}s/epoch (bounded to [{policy.epoch_min}, {policy.epoch_max}])."
         )
 
         full_estimate = estimate_training_time(
@@ -249,7 +257,7 @@ class ResourceEvaluator:
             ),
             epochs=epochs, epoch_policy_reason=epoch_reason, num_workers=num_workers,
             memory_estimate=chosen_memory_dict, available_memory_mb=available_mb,
-            time_estimate=full_estimate.to_dict(), reason=reason,
+            time_estimate=full_estimate.to_dict(), reason=reason, time_budget_seconds=budget_seconds,
         )
 
     def _device_key(self) -> str:
