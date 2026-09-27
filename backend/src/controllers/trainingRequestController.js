@@ -324,7 +324,84 @@ const withdrawFromTrainingRequest = async (req, res) => {
   }
 };
 
+// Hospital reports aggregate progress of its LOCAL training run (Member 1 ML
+// pipeline). Only whitelisted numeric metrics are stored - never images,
+// paths, or patient data.
+const reportTrainingProgress = async (req, res) => {
+  const { request_id } = req.params;
+  const hospital_id = req.user.hospital_id;
+  const { status, current_epoch, total_epochs, loss, accuracy } = req.body || {};
+
+  if (!hospital_id) {
+    return res.status(403).json({
+      success: false,
+      error: { code: 'HOSPITAL_ACCESS_DENIED', message: 'Only hospital operators can report training progress' }
+    });
+  }
+
+  const isCount = (v) => v === null || v === undefined || (Number.isInteger(v) && v >= 0 && v <= 100000);
+  const isNum = (v) => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v));
+  if (!['TRAINING', 'COMPLETED'].includes(status) || !isCount(current_epoch) || !isCount(total_epochs)
+      || !isNum(loss) || !isNum(accuracy) || (typeof accuracy === 'number' && (accuracy < 0 || accuracy > 1))) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'status must be TRAINING or COMPLETED; metrics must be numeric (accuracy in [0, 1])' }
+    });
+  }
+
+  try {
+    const request = await TrainingRequest.findOne({ request_id });
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Training request not found' }
+      });
+    }
+
+    const entry = request.participating_hospitals.find(p => p.hospital_id === hospital_id);
+    if (!entry || entry.status === 'WITHDRAWN') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NOT_PARTICIPATING', message: 'This hospital is not an active participant in this training request' }
+      });
+    }
+
+    const previousStatus = entry.status;
+    entry.status = status;
+    entry.training_metrics = {
+      current_epoch: current_epoch ?? null,
+      total_epochs: total_epochs ?? null,
+      loss: loss ?? null,
+      accuracy: accuracy ?? null,
+      status: status === 'COMPLETED' ? 'Local training completed' : 'Local training in progress'
+    };
+    await request.save();
+
+    if (previousStatus !== status) {
+      await AuditService.logEvent({
+        user_id: req.user.user_id,
+        action: status === 'COMPLETED' ? 'HOSPITAL_LOCAL_TRAINING_COMPLETED' : 'HOSPITAL_LOCAL_TRAINING_STARTED',
+        resource_type: 'TrainingRequest',
+        resource_id: request_id,
+        hospital_id,
+        ip_address: req.ip,
+        user_agent: req.get('User-Agent'),
+        success: true,
+        metadata: { hospital_id, request_id }
+      });
+    }
+
+    res.status(200).json({ success: true, data: { participation: entry } });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: error.message }
+    });
+  }
+};
+
 module.exports = {
+  reportTrainingProgress,
   createTrainingRequest,
   getAllTrainingRequests,
   getMyTrainingRequests,

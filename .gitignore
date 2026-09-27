@@ -121,3 +121,18 @@ ehthumbs.db
 ehthumbs_vista.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# Local dev / generated
+.claude/
+CLAUDE.md
+.coverage
+demo_charts/
+/outputs/
+*.safetensors
+.playwright-mcp/
+# Local ML service outputs (hospital_client.local_api; default ML_WORK_DIR is ~/medfl_ml_work,
+# ignored here in case it is pointed inside the repo)
+medfl_ml_work/
+# Misnamed env files (Vite/dotenv only read .env) - never commit their secrets
+/backend/env
+/frontend/**/env

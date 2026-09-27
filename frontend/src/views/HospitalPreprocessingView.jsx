@@ -1,53 +1,36 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useML } from '../context/MLContext';
 import preprocessingService from '../services/preprocessingService';
 import PrivacyNotice from '../components/common/PrivacyNotice';
-import { 
-  Cpu, 
-  Play, 
-  CheckCircle, 
-  ShieldCheck, 
-  AlertCircle, 
-  Sliders, 
-  FileText, 
-  Layers, 
-  Sparkles,
+import PipelineStatus from '../components/training/PipelineStatus';
+import { DistributionBars, ReportText } from '../components/charts/MLCharts';
+import {
+  Cpu,
+  Play,
+  CheckCircle,
+  ShieldCheck,
+  Sliders,
+  AlertTriangle,
   ArrowRight
 } from 'lucide-react';
 
+const inputStyle = {
+  width: '100%', padding: '7px 10px', backgroundColor: '#090d16', border: '1px solid var(--border-subtle)',
+  borderRadius: 'var(--radius-md)', color: 'var(--text-primary)', fontSize: '12px', outline: 'none', fontFamily: 'var(--font-mono)'
+};
+
 const PreprocessingView = () => {
-  const { activeDataset, preprocessingReport, setPreprocessingReport, setActiveTab } = useApp();
+  const { setActiveTab } = useApp();
+  const { activeDataset, pipeline, rerunPreprocessing } = useML();
   const [config, setConfig] = useState(preprocessingService.getDefaultConfig());
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [currentProgress, setCurrentProgress] = useState(null);
-  const [error, setError] = useState(null);
-
-  const handleRunPreprocessing = async () => {
-    if (!activeDataset) {
-      setError('Please select an active dataset in Dataset Inspection first.');
-      return;
-    }
-
-    setError(null);
-    setIsProcessing(true);
-    setCurrentProgress({ step: 1, total_steps: 6, label: 'Initializing preprocessing pipeline...', percent: 5 });
-
-    try {
-      const report = await preprocessingService.runPreprocessing(
-        activeDataset.id,
-        config,
-        (progress) => {
-          setCurrentProgress(progress);
-        }
-      );
-      setPreprocessingReport(report);
-    } catch (err) {
-      setError(err.message || 'Preprocessing engine encountered an error.');
-    } finally {
-      setIsProcessing(false);
-      setCurrentProgress(null);
-    }
-  };
+  const report = activeDataset?.preprocessing;
+  const sv = report?.split_validation;
+  const leakage = [
+    ...(sv?.duplicate_leakage || []).map((x) => `Duplicate across splits: ${JSON.stringify(x)}`),
+    ...Object.entries(sv?.group_leakage || {}).map(([k, v]) => `Group leakage ${k}: ${JSON.stringify(v)}`),
+  ];
+  const set = (k) => (e) => setConfig({ ...config, [k]: e.target.value });
 
   return (
     <div style={{ padding: '20px', overflowY: 'auto', height: '100%' }}>
@@ -61,65 +44,64 @@ const PreprocessingView = () => {
             <Cpu size={16} color="var(--accent-teal)" />
             <span>Module 5: Automated Preprocessing Engine</span>
           </span>
-          <span className="badge badge-teal font-mono">
-            Tensors Formatted Locally
-          </span>
+          <span className="badge badge-teal font-mono">Runs Locally</span>
         </div>
         <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-          Standardizes clinical images into normalized PyTorch tensors [3, 224, 224]. 
-          Enforces patient ID isolation to guarantee <strong>zero split data leakage</strong> before training.
+          Validates every sample, quarantines unusable files, and builds reproducible, seed-controlled, class-aware
+          train/validation/test splits with leakage checks. Runs automatically after inspection with the defaults below;
+          re-run here with a patient/group-id map for patient-level splitting. Source files are never modified.
         </p>
       </div>
 
+      <PipelineStatus />
+
       {/* Target Dataset & Pipeline Config */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '16px' }}>
-        {/* Dataset Selection Context */}
         <div className="card">
-          <div className="card-title-muted" style={{ marginBottom: '8px' }}>
-            Target Ingested Cohort
-          </div>
+          <div className="card-title-muted" style={{ marginBottom: '8px' }}>Target Dataset</div>
           {activeDataset ? (
             <div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                {activeDataset.name}
-              </div>
+              <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>{activeDataset.name}</div>
               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-                ID: <span className="font-mono text-cyan">{activeDataset.id}</span> | Modality: {activeDataset.modality}
+                ID: <span className="font-mono text-cyan">{activeDataset.dataset_id}</span> | Type: {activeDataset.profile?.dataset_type}
               </div>
               <div style={{ padding: '8px 10px', backgroundColor: '#090d16', borderRadius: 'var(--radius-sm)', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                Input Tensors: <strong>{activeDataset.valid_samples} images</strong> across 3 classes
+                Input: <strong>{activeDataset.profile?.valid_samples?.toLocaleString()} valid samples</strong> across {(activeDataset.profile?.classes || []).length} classes
               </div>
             </div>
           ) : (
-            <div className="text-muted" style={{ fontSize: '12px' }}>
-              No dataset selected. Return to Dataset Inspection.
-            </div>
+            <div className="text-muted" style={{ fontSize: '12px' }}>No dataset located yet. Go to Dataset Inspection.</div>
           )}
         </div>
 
-        {/* Pipeline Parameters */}
         <div className="card">
           <div className="card-title">
             <Sliders size={14} color="var(--brand-blue)" />
-            <span>Configured Transformations</span>
+            <span>Preprocessing Options (CLI flags)</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '11px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">Target Resolution:</span>
-              <span className="font-mono text-primary">[224, 224]</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">CLAHE Equalization:</span>
-              <span className="font-mono text-emerald">Enabled (Clip 2.0, Grid 8x8)</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">Patient Split Isolation:</span>
-              <span className="font-mono text-emerald">Strict Enforcement</span>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <span className="text-muted">Normalization:</span>
-              <span className="font-mono text-cyan">ImageNet Mean & Std</span>
-            </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '11px' }}>
+            <label>
+              <span className="text-muted">Output mode (--mode)</span>
+              <select value={config.mode} onChange={set('mode')} style={inputStyle}>
+                <option value="lazy">lazy (manifests, no copy)</option>
+                <option value="materialized">materialized (processed copy)</option>
+              </select>
+            </label>
+            <label>
+              <span className="text-muted">Invalid existing split</span>
+              <select value={config.invalid_split_policy} onChange={set('invalid_split_policy')} style={inputStyle}>
+                <option value="error">error (stop)</option>
+                <option value="regenerate">regenerate</option>
+              </select>
+            </label>
+            <label style={{ gridColumn: 'span 2' }}>
+              <span className="text-muted">Patient/group id map JSON (--group-id-map, optional)</span>
+              <input value={config.group_id_map_path} onChange={set('group_id_map_path')} placeholder="C:\path\group_id_map.json" style={inputStyle} />
+            </label>
+            <label style={{ gridColumn: 'span 2' }}>
+              <span className="text-muted">Tabular target column (--target-column, optional)</span>
+              <input value={config.target_column} onChange={set('target_column')} style={inputStyle} />
+            </label>
           </div>
         </div>
       </div>
@@ -128,126 +110,81 @@ const PreprocessingView = () => {
       <div className="card" style={{ marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              Execute Preprocessing Pipeline
-            </div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>Re-run Preprocessing Pipeline</div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Generates normalized tensors in local cache without altering source DICOM/PNG originals.
+              Replaces this dataset's previous preprocessing output, then refreshes the Module 8 recommendations.
             </div>
           </div>
-
-          <button
-            onClick={handleRunPreprocessing}
-            disabled={isProcessing || !activeDataset}
-            className="btn btn-teal"
-            style={{ padding: '8px 16px', fontSize: '12px' }}
-          >
+          <button onClick={() => rerunPreprocessing(config)} disabled={pipeline.running || !activeDataset?.profile}
+            className="btn btn-teal" style={{ padding: '8px 16px', fontSize: '12px' }}>
             <Play size={14} />
-            {isProcessing ? 'Preprocessing in Progress...' : 'Start Preprocessing Pipeline'}
+            {pipeline.running ? 'Pipeline Running...' : 'Run Preprocessing'}
           </button>
         </div>
-
-        {/* Progress Bar while running */}
-        {isProcessing && currentProgress && (
-          <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '6px' }}>
-              <span style={{ color: 'var(--text-secondary)' }}>
-                Step {currentProgress.step} of {currentProgress.total_steps}: <strong>{currentProgress.label}</strong>
-              </span>
-              <span className="font-mono text-cyan" style={{ fontWeight: 600 }}>
-                {currentProgress.percent}%
-              </span>
-            </div>
-            <div style={{ height: '6px', backgroundColor: '#090d16', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{
-                height: '100%',
-                width: `${currentProgress.percent}%`,
-                background: 'linear-gradient(90deg, #0891b2 0%, #10b981 100%)',
-                transition: 'width 0.3s ease'
-              }} />
-            </div>
-          </div>
-        )}
-
-        {error && (
-          <div style={{
-            marginTop: '12px',
-            padding: '8px 12px',
-            backgroundColor: 'var(--status-danger-bg)',
-            border: '1px solid var(--status-danger-border)',
-            borderRadius: 'var(--radius-md)',
-            color: 'var(--status-danger)',
-            fontSize: '11px'
-          }}>
-            {error}
-          </div>
-        )}
       </div>
 
       {/* Preprocessing Summary Report */}
-      {preprocessingReport && (
+      {report && (
         <div className="card" style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}>
           <div className="card-title" style={{ justifyContent: 'space-between' }}>
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <CheckCircle size={16} color="var(--status-healthy)" />
-              <span>Module 5 Preprocessing Report (Verified)</span>
+              <span>Module 5 Preprocessing Report</span>
             </span>
-            <span className="badge badge-healthy font-mono">STATUS: {preprocessingReport.status}</span>
+            <span className={`badge font-mono ${report.reconciliation?.is_balanced ? 'badge-healthy' : 'badge-danger'}`}>
+              ACCOUNTING: {report.reconciliation?.is_balanced ? 'BALANCED' : 'MISMATCH'}
+            </span>
           </div>
 
           {/* Leakage Check Card */}
           <div style={{
-            padding: '12px',
-            backgroundColor: '#0a1622',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            borderRadius: 'var(--radius-md)',
-            marginBottom: '14px',
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: '10px'
+            padding: '12px', backgroundColor: '#0a1622', borderRadius: 'var(--radius-md)', marginBottom: '14px',
+            border: `1px solid ${leakage.length ? 'var(--status-danger-border)' : 'rgba(16, 185, 129, 0.3)'}`,
+            display: 'flex', alignItems: 'flex-start', gap: '10px'
           }}>
-            <ShieldCheck size={18} color="var(--status-healthy)" style={{ flexShrink: 0, marginTop: '2px' }} />
+            {leakage.length ? <AlertTriangle size={18} color="var(--status-danger)" /> : <ShieldCheck size={18} color="var(--status-healthy)" style={{ flexShrink: 0, marginTop: '2px' }} />}
             <div style={{ fontSize: '11px' }}>
-              <div style={{ fontWeight: 600, color: 'var(--status-healthy)', marginBottom: '2px' }}>
-                Automated Split Leakage Check: PASSED (Zero Overlap)
+              <div style={{ fontWeight: 600, color: leakage.length ? 'var(--status-danger)' : 'var(--status-healthy)', marginBottom: '2px' }}>
+                Split leakage checks: {leakage.length ? `${leakage.length} issue(s)` : 'no duplicate or group leakage detected'}
               </div>
               <p style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                {preprocessingReport.leakage_check.details} Total patient ID overlap detected: <strong>0</strong>.
+                Split strategy: <strong>{report.config?.split_strategy}</strong>.{' '}
+                {report.config?.split_strategy === 'grouped'
+                  ? 'Groups (patients) never span two splits.'
+                  : 'No patient/group ids were supplied, so patient-level leakage cannot be ruled out for this dataset.'}
               </p>
+              {leakage.map((l, i) => <div key={i} className="font-mono text-danger">{l}</div>)}
             </div>
           </div>
 
-          {/* Tensor Stats Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', marginBottom: '14px', fontSize: '11px' }}>
-            <div style={{ padding: '10px', backgroundColor: '#090d16', borderRadius: 'var(--radius-sm)' }}>
-              <span className="text-muted">Normalized Tensors:</span>
-              <div className="font-mono text-primary" style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>
-                {preprocessingReport.quality_verification.valid_tensors_generated}
+          {/* Accounting Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '14px', fontSize: '11px' }}>
+            {[
+              ['Discovered', report.quarantine?.total_discovered, 'text-primary'],
+              ['Accepted', report.quarantine?.accepted, 'text-emerald'],
+              ['Rejected (quarantined)', report.quarantine?.rejected, 'text-danger'],
+              ['Needs review', report.quarantine?.review, 'text-amber'],
+            ].map(([k, v, cls]) => (
+              <div key={k} style={{ padding: '10px', backgroundColor: '#090d16', borderRadius: 'var(--radius-sm)' }}>
+                <span className="text-muted">{k}:</span>
+                <div className={`font-mono ${cls}`} style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>{(v ?? 0).toLocaleString()}</div>
               </div>
-            </div>
-            <div style={{ padding: '10px', backgroundColor: '#090d16', borderRadius: 'var(--radius-sm)' }}>
-              <span className="text-muted">Post-Norm Tensor Shape:</span>
-              <div className="font-mono text-cyan" style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>
-                {preprocessingReport.quality_verification.dimensions}
-              </div>
-            </div>
-            <div style={{ padding: '10px', backgroundColor: '#090d16', borderRadius: 'var(--radius-sm)' }}>
-              <span className="text-muted">Mean / Std Intensity:</span>
-              <div className="font-mono text-emerald" style={{ fontSize: '14px', fontWeight: 600, marginTop: '2px' }}>
-                {preprocessingReport.quality_verification.mean_intensity_post_norm} / {preprocessingReport.quality_verification.std_intensity_post_norm}
-              </div>
-            </div>
+            ))}
           </div>
 
-          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '14px' }}>
-            {preprocessingReport.report_summary}
-          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '14px' }}>
+            <div>
+              <div className="card-title-muted" style={{ marginBottom: '8px' }}>Split sizes</div>
+              <DistributionBars distribution={report.splits} colors={['#3b82f6', '#06b6d4', '#10b981']} />
+            </div>
+            <div>
+              <div className="card-title-muted" style={{ marginBottom: '8px' }}>preprocessing_report.md</div>
+              {activeDataset.preprocessing_report_md && <ReportText text={activeDataset.preprocessing_report_md} />}
+            </div>
+          </div>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              onClick={() => setActiveTab('start_training')}
-              className="btn btn-teal"
-            >
+            <button onClick={() => setActiveTab('start_training')} className="btn btn-teal">
               Proceed to Start Training (Module 8) <ArrowRight size={14} />
             </button>
           </div>

@@ -1,5 +1,6 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
+import { useML } from '../../context/MLContext';
 import { 
   ShieldCheck, 
   Cpu, 
@@ -8,16 +9,17 @@ import {
 } from 'lucide-react';
 
 export const HospitalTopNav = () => {
-  const { 
-    activeScreen, 
-    hospitalId, 
-    hardware, 
-    activeTrainingSession,
+  const {
+    activeScreen,
+    hospitalId,
     notifications,
     setActiveScreen
   } = useApp();
+  const { hardware, trainingJob } = useML();
 
-  const isTraining = activeTrainingSession && activeTrainingSession.status === 'TRAINING';
+  const isTraining = trainingJob?.status === 'running';
+  const gpu = hardware?.gpu;
+  const gb = (mb) => `${(mb / 1024).toFixed(1)} GB`;
   const unreadCount = (notifications || []).filter(n => !n.read).length;
 
   const tabLabels = {
@@ -73,11 +75,13 @@ export const HospitalTopNav = () => {
             <Server size={13} color="var(--accent-teal)" />
             <span style={{ color: 'var(--text-secondary)' }}>GPU:</span>
             <span className="font-mono text-cyan" style={{ fontWeight: 600 }}>
-              {hardware?.gpu || 'RTX 3080 Ti'}
+              {hardware ? (gpu?.cuda_available ? gpu.gpu_name.replace('NVIDIA GeForce ', '') : 'CPU only') : '-'}
             </span>
-            <span className="badge badge-healthy" style={{ padding: '0 4px', fontSize: '9px' }}>
-              CUDA 12.2
-            </span>
+            {gpu?.cuda_available && (
+              <span className="badge badge-healthy" style={{ padding: '0 4px', fontSize: '9px' }}>
+                CUDA
+              </span>
+            )}
           </div>
 
           <span style={{ color: 'var(--border-strong)' }}>|</span>
@@ -87,7 +91,7 @@ export const HospitalTopNav = () => {
             <Cpu size={13} color="#818cf8" />
             <span style={{ color: 'var(--text-secondary)' }}>VRAM:</span>
             <span className="font-mono" style={{ color: isTraining ? 'var(--status-warning)' : 'var(--text-primary)', fontWeight: 600 }}>
-              {isTraining ? '3.4 GB / 12.0 GB' : '1.8 GB / 12.0 GB'}
+              {gpu?.cuda_available ? `${gb(gpu.free_vram_mb)} free / ${gb(gpu.total_vram_mb)}` : '-'}
             </span>
           </div>
 

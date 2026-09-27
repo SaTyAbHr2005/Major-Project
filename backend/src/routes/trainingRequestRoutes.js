@@ -5,7 +5,8 @@ const {
   getMyTrainingRequests,
   getTrainingRequestById,
   participateInTrainingRequest,
-  withdrawFromTrainingRequest
+  withdrawFromTrainingRequest,
+  reportTrainingProgress
 } = require('../controllers/trainingRequestController');
 
 const { requireAuth } = require('../authentication/middleware/authMiddleware');
@@ -34,5 +35,8 @@ router.post('/:request_id/participate', requireRole(ROLES.HOSPITAL_OPERATOR), pa
 
 // Hospital Operator: Withdraw
 router.post('/:request_id/withdraw', requireRole(ROLES.HOSPITAL_OPERATOR), withdrawFromTrainingRequest);
+
+// Hospital Operator: report aggregate local-training progress (no raw data)
+router.post('/:request_id/progress', requireRole(ROLES.HOSPITAL_OPERATOR), reportTrainingProgress);
 
 module.exports = router;

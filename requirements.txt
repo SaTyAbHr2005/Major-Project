@@ -1,54 +1,55 @@
 # ==============================================================================
 # Secure and Privacy-Preserving Federated Deep Learning Platform
-# Requirements & Python Dependencies for ML/FL Engines (Modules 4-10, 12, 16)
+# Python dependencies for the implemented hospital-side ML pipeline
+# (hospital_client: Modules 4, 5, 6, 7, 8, 16 + the local ML service for the UI)
+#
+# Tested with Python 3.10. Install PyTorch FIRST if you have an NVIDIA GPU
+# (a plain "pip install torch" on Windows installs the CPU-only build):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+# then:
+#   pip install -r requirements.txt
+# See README.md for the full setup.
 # ==============================================================================
 
-# --- Deep Learning Framework & Vision ---
-torch>=2.1.0
+# --- Deep learning ---
+torch>=2.3.0
 torchvision>=0.16.0
-torchaudio>=2.1.0
+safetensors>=0.4.0            # Module 6 model artifacts (weights are never pickled)
 
-# --- Federated Learning Engine (Modules 9, 12) ---
-flwr[simulation]>=1.7.0
-protobuf>=4.25.0
-
-# --- Privacy-Preserving Machine Learning & Differential Privacy (Module 10) ---
-opacus>=1.4.0
-cryptography>=42.0.0
-
-# --- Medical Imaging & Radiology Pipelines (Modules 4, 5, 16) ---
-monai>=1.3.0
-pydicom>=2.4.4
-nibabel>=5.2.0
-SimpleITK>=2.3.1
-Pillow>=10.2.0
-scikit-image>=0.22.0
-
-# --- Scientific Computing & Analytics ---
+# --- Data, images, spreadsheets (Modules 4, 5, 16) ---
 numpy>=1.26.0
-scipy>=1.11.0
 pandas>=2.2.0
+Pillow>=10.2.0
+openpyxl>=3.1.0               # .xlsx
+xlrd>=2.0.1                   # .xls (read)
+xlwt>=1.3.0                   # .xls (test fixtures)
+
+# --- Metrics and evaluation plots (Module 7) ---
 scikit-learn>=1.4.0
-
-# --- Computer Vision & Array Manipulation ---
-opencv-python-headless>=4.9.0
-
-# --- Workstation & GPU Resource Telemetry (Module 8, 13) ---
-psutil>=5.9.8
-pynvml>=11.5.0
-gputil>=1.4.0
-
-# --- Inter-Node Network & Event Streaming (Modules 11, 18) ---
-fastapi>=0.110.0
-uvicorn[standard]>=0.28.0
-python-socketio>=5.11.0
-requests>=2.31.0
-websockets>=12.0
-aiohttp>=3.9.3
-
-# --- Testing, Benchmarking & Visualization (Modules 19, 20) ---
-pytest>=8.1.0
-pytest-cov>=4.1.0
-pytest-asyncio>=0.23.0
 matplotlib>=3.8.0
-seaborn>=0.13.0
+
+# --- Hardware detection / monitoring (Module 8) ---
+psutil>=5.9.8
+
+# --- Tests ---
+pytest>=8.1.0
+pytest-cov>=4.1.0             # optional: coverage reports
+
+# The local ML service (python -m hospital_client.local_api) uses only the Python
+# standard library. Its "Browse..." folder picker needs tkinter: bundled with Python
+# on Windows/macOS; on Linux install the OS package (e.g. sudo apt install python3-tk).
+
+# ==============================================================================
+# PLANNED - not used by any code in this repository yet. Install these when the
+# corresponding module is implemented (kept here so the plan is not lost):
+#
+#   Federated learning (Modules 9, 12):   flwr[simulation]>=1.7.0  protobuf>=4.25.0
+#   Differential privacy (Module 10):     opacus>=1.4.0
+#   Secure communication (Module 11):     cryptography>=42.0.0
+#   Medical formats (DICOM/NIfTI):        pydicom>=2.4.4  nibabel>=5.2.0  SimpleITK>=2.3.1  monai>=1.3.0
+#   Extra imaging utilities:              scikit-image>=0.22.0  scipy>=1.11.0  opencv-python-headless>=4.9.0
+#   GPU telemetry alternatives:           pynvml>=11.5.0  gputil>=1.4.0
+#   Python services / events (11, 18):    fastapi>=0.110.0  uvicorn[standard]>=0.28.0  python-socketio>=5.11.0
+#                                         requests>=2.31.0  websockets>=12.0  aiohttp>=3.9.3
+#   Research plots / async tests (19,20): seaborn>=0.13.0  pytest-asyncio>=0.23.0  torchaudio>=2.1.0
+# ==============================================================================

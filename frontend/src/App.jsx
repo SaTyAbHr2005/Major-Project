@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppProvider, useApp } from './context/AppContext';
+import { MLProvider } from './context/MLContext';
 
 // Navigation Components
 import { Sidebar } from './components/common/Sidebar';
@@ -180,7 +181,9 @@ const MainLayout = () => {
 export default function App() {
   return (
     <AppProvider>
-      <MainLayout />
+      <MLProvider>
+        <MainLayout />
+      </MLProvider>
     </AppProvider>
   );
 }

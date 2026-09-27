@@ -2,7 +2,7 @@
 
 **Project:** Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging  
 **Owner:** Member 4 (Frontend + Desktop + Mobile + Communication)  
-**Location:** `frontend/researcher-desktop/`  
+**Location:** `frontend/` (consolidated app; researcher views in `frontend/src/views/`)  
 **Status:** Functionally Complete & Verified (`[x] Completed`)  
 **Last Updated:** 2026-09-23
 
@@ -204,13 +204,16 @@ Module 2 contains 16 distinct operational screens and dialog suites:
 ## 6. How to Run Locally
 
 ### Prerequisites
-- Node.js >= 18.0.0
+- Node.js >= 20.19 (the backend's mongoose 9 requires it)
 - npm >= 9.0.0
+
+The researcher desktop is part of the single consolidated app in `frontend/` (the separate
+`frontend/researcher-desktop/` folder was removed). See the root `README.md` for the full setup.
 
 ### Installation & Execution
 ```powershell
-# 1. Navigate to Module 2 directory
-cd C:\Users\Admin\Desktop\Major-Project\frontend\researcher-desktop
+# 1. From the repository root, go to the consolidated frontend app
+cd frontend
 
 # 2. Install dependencies (if not already installed)
 npm install

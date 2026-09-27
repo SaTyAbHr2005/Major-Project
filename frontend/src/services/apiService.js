@@ -71,6 +71,34 @@ class ApiService {
     return data.data.training_requests;
   }
 
+  // --- Hospital Operator: participation & local-training progress ---
+
+  async participateInTrainingRequest(requestId) {
+    const res = await fetch(`${API_BASE_URL}/training-requests/${encodeURIComponent(requestId)}/participate`, {
+      method: 'POST',
+      headers: this.getHeaders()
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data?.error?.message || 'Failed to join training request');
+    }
+    return data.data;
+  }
+
+  /** Aggregate metrics only (epoch, loss, accuracy) - never images or patient data. */
+  async reportTrainingProgress(requestId, { status, current_epoch, total_epochs, loss, accuracy }) {
+    const res = await fetch(`${API_BASE_URL}/training-requests/${encodeURIComponent(requestId)}/progress`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ status, current_epoch, total_epochs, loss, accuracy })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data?.error?.message || 'Failed to report training progress');
+    }
+    return data.data;
+  }
+
   // --- Admin Operations ---
 
   async getPendingResearchers() {

@@ -2,29 +2,35 @@
 
 **Project:** Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging  
 **Owner:** Member 4 (Frontend + Desktop + Mobile + Communication)  
-**Location:** `frontend/hospital-desktop/`  
-**Status:** Functionally Complete & Verified (`[x] Completed`)  
-**Last Updated:** 2026-09-23
+**Location:** `frontend/` (consolidated researcher + hospital app; hospital screens are `frontend/src/views/Hospital*View.jsx`)  
+**Status:** Functionally Complete; ML screens integrated with the real Member 1 pipeline  
+**Last Updated:** 2026-09-27
+
+> **Integration update (2026-09-27).** The separate `frontend/hospital-desktop/` and
+> `frontend/researcher-desktop/` apps were removed; `frontend/` is the single app. The hospital
+> ML screens (Modules 4, 5, 6, 7, 8, 16) no longer use mock services: they call the hospital-local
+> ML service (`python -m hospital_client.local_api`, 127.0.0.1:8765), which runs the real module
+> CLIs on this machine. All numbers shown on those screens come from real pipeline output. See
+> `ml_pipeline_architecture.md` → *Hospital Desktop Integration*. Module 9/10/15 cards remain as
+> placeholders for future modules and are labelled as pending.
 
 ---
 
 ## Status & Implementation Checklist
 
-- [x] Hospital Operator Dashboard with live workstation telemetry (NVIDIA RTX 3080 Ti / CUDA 12.2)
-- [x] Module 4: Dataset Ingestion, DICOM/NIfTI Header Inspection & Class Imbalance Profiler
-- [x] Module 5: Automated Preprocessing Engine with CLAHE, Normalization & Split Leakage Check
-- [x] Module 8: Hardware Resource Profiler & 3-Tier Dynamic Training Recommendations
-- [x] Dynamic hardware classification for EfficientNet-B0 (evaluated per VRAM/compute tier)
-- [x] Module 7: Local PyTorch Training Orchestration with epoch/batch streaming & live loss curves
-- [x] Module 7: Training Result Viewer & Local Checkpoint Cryptographic Digest
-- [x] Module 9: Federation Handoff Bundle packaging with Zero-Raw-Images Certification
-- [x] Module 6: Approved Clinical Model Registry with parameter specs and SHA-256 integrity checksums
-- [x] Module 16: Zero-Leakage Local Inference Engine with probability breakdown & clinical disclaimer
-- [x] Module 18: Consortium Communication, Dispatch Chat & Notification Inbox
+- [x] Hospital Operator Dashboard with measured workstation hardware (Module 8 `detect`)
+- [x] Module 4: locate a dataset (native folder picker or path) and view the real DatasetProfile
+- [x] Module 5: automatic preprocessing with accounting, split sizes and leakage checks; optional re-run with a patient/group-id map
+- [x] Module 8: up to 3 hardware- and data-aware recommendations, a same-tier alternative for each, a manual configuration with a load meter, and all 8 model assessments; the operator must choose one explicitly
+- [x] Module 7: launch training, live per-epoch loss/accuracy curves, log stream, terminate
+- [x] Module 7: results with test metrics, per-class table, confusion matrix, ROC/PR plot images, resource statistics
+- [x] Module 9 placeholder: FederationHandoff prepared locally by Module 7 (transmission/aggregation pending in Module 9)
+- [x] Module 6: local model registry (versions, class mapping, SHA-256); Module 15 approval pending
+- [x] Module 16: local inference on an uploaded image (temporary copy deleted after prediction)
+- [x] Optional link of a local run to a backend training request (aggregate progress only)
+- [x] Module 18: Consortium Communication, Dispatch Chat & Notification Inbox (UI)
 - [x] Module 1: Authentication & Strict Hospital Isolation Adapter (`authService.js`)
-- [x] Workstation Settings with Enclave Hardware Diagnostics & Storage Paths
-- [x] Comprehensive Automated Test Suite (24 unit/integration tests running with `node --test`)
-- [x] Production Verification & `.env` Backend Linking Complete
+- [x] Workstation Settings (UI)
 
 ---
 
@@ -39,7 +45,7 @@ Module 3 is the hospital-side desktop application for clinical nodes. It provide
 ```text
                                +------------------------------------------+
                                |     Module 3: Hospital Desktop App       |
-                               | (React 19 + Vite + CSS Design System)    |
+                               | (React 18 + Vite + CSS Design System)    |
                                +--------------------+---------------------+
                                                     |
          +------------------------------------------+------------------------------------------+
@@ -63,9 +69,15 @@ Module 3 is the hospital-side desktop application for clinical nodes. It provide
                                |   Backend & Consortium Infrastructure    |
                                |  • Module 1: Auth & Hospital Isolation   |
                                |    (HOSP_000001, ROLES.HOSPITAL_OPERATOR)|
-                               |  • Module 9: Central Aggregator Server   |
+                               |  • Module 9: Central Aggregator (future) |
                                +------------------------------------------+
 ```
+
+The ML services (`datasetService`, `preprocessingService`, `resourceService`, `trainingService`,
+`modelService`, `inferenceService`) talk to the **hospital-local ML service** through
+`services/mlClient.js`, not to the backend: raw images and datasets never go to the backend.
+Shared ML state (active dataset, pipeline progress, hardware, training job) lives in
+`context/MLContext.jsx`.
 
 ---
 
@@ -74,13 +86,13 @@ Module 3 is the hospital-side desktop application for clinical nodes. It provide
 | Responsibility | Handled by Module 3 | Related Modules |
 |---|:---:|:---:|
 | Clinical operator login & hospital session isolation | ✅ | Module 1 (Auth & Isolation) |
-| Local dataset ingestion & DICOM/NIfTI header validation | ✅ | Module 4 (Dataset Ingestion) |
-| Image normalization, CLAHE enhancement & patient split isolation | ✅ | Module 5 (Preprocessing) |
-| Hardware inspection & 3-tier training recommendation | ✅ | Module 8 (Resource-Aware Engine) |
-| Local deep learning training monitor & loss visualization | ✅ | Module 7 (Local Training) |
-| Generation of `FederationHandoff` bundle (weights delta only) | ✅ | Module 9 (FL Engine) |
-| Approved local model registry verification | ✅ | Module 6 (Model Registry) |
-| Zero-leakage local clinical inference entry point | ✅ | Module 16 (Local Inference) |
+| Local dataset selection & inspection results (image folders, CSV/XLS/XLSX) | ✅ | Module 4 (Dataset Ingestion) |
+| Preprocessing results, split accounting & leakage checks | ✅ | Module 5 (Preprocessing) |
+| Hardware inspection & 3-option training recommendation | ✅ | Module 8 (Resource-Aware Engine) |
+| Local deep learning training monitor & loss/accuracy curves | ✅ | Module 7 (Local Training) |
+| Display of the locally prepared `FederationHandoff` (built by Module 7) | ✅ | Module 9 (FL Engine, pending) |
+| Local model registry view | ✅ | Module 6 (Model Management) |
+| Local inference entry point | ✅ | Module 16 (Local Inference) |
 | Secure consortium messaging & alert center | ✅ | Module 18 (Communication) |
 | Raw image transmission outside hospital network | ❌ *(Permanently blocked)* | Core Architectural Invariant |
 | Central model aggregation across multiple hospitals | ❌ | Handled centrally in Module 9 |
@@ -99,54 +111,46 @@ Module 3 enforces the strict security rules of Module 1:
 
 ## 4. Key Workflows & Screen Breakdown
 
-### 1. Hospital Operator Dashboard (`DashboardView.jsx`)
-- Active hospital node banner (`HOSP_000001` • *St. Jude Clinical Research & AI Node*).
-- Live hardware telemetry strip: NVIDIA RTX 3080 Ti (12GB GDDR6X, CUDA 12.2), active VRAM usage, host RAM, CPU load, and node status.
-- Primary local dataset summary and recent training session audit trail.
+### 1. Hospital Operator Dashboard (`HospitalDashboardView.jsx`)
+- Hospital node banner and local ML service status (online/offline, with the start command when offline).
+- Measured hardware: GPU name and compute capability, free/total VRAM, free/total RAM, CPU cores/threads, free storage (Module 8 `detect`).
+- Active dataset summary, current training state, and the most recent local training runs read from disk.
 
-### 2. Module 4: Dataset Ingestion & Inspection (`DatasetView.jsx`)
-- Multi-modality local folder scanner (DICOM series, NIfTI volumes, high-res radiographs).
-- Full dataset integrity audit: total samples (5,856), valid tensors (5,840), corrupted/unreadable files (16), duplicate records (12).
-- Split distribution graph (Train: 71.8%, Val: 14.2%, Test: 14.0%).
-- Class imbalance bars (Normal vs Bacterial Pneumonia vs Viral Pneumonia).
-- Tensor statistics: dimensions `[1, 1024, 1024]`, pixel spacing, dynamic range, and photometric interpretation.
-- **Zero-Patient-Overlap Guarantee:** Patient cohort analyzer verifying that no patient appears in both train and validation splits.
+### 2. Module 4: Dataset Ingestion & Inspection (`HospitalDatasetView.jsx`)
+- The operator only **locates** the dataset: a native folder picker ("Browse...") on this workstation or a typed path. Inspection, preprocessing and recommendations then run automatically, with a step tracker and the live command log.
+- Real DatasetProfile: total/valid/invalid samples, exact duplicates, class distribution, detected splits, image dimension ranges, color modes and formats, tabular/missing-data statistics, warnings/errors, and the generated `dataset_report.md`.
+- Previously inspected datasets can be re-selected.
 
-### 3. Module 5: Automated Preprocessing Engine (`PreprocessingView.jsx`)
-- Preprocessing pipeline controls: spatial resizing `[3, 224, 224]`, CLAHE adaptive histogram equalization ($clip=2.0, tile=8\times8$), ImageNet normalization ($\mu=[0.485, 0.456, 0.406]$, $\sigma=[0.229, 0.224, 0.225]$).
-- Live step-by-step progress monitor with elapsed timing and per-sample throughput.
-- Preprocessing verification report with tensor shape validation and leakage checks.
+### 3. Module 5: Automated Preprocessing Engine (`HospitalPreprocessingView.jsx`)
+- Shows the real preprocessing report: discovered/accepted/rejected/review accounting, split sizes, split strategy, leakage checks, and `preprocessing_report.md`.
+- Optional re-run with CLI options: `lazy`/`materialized` mode, invalid-split policy, patient/group-id map (enables patient-level splits), tabular target column.
 
-### 4. Module 8: Resource-Aware Training Recommendations (`StartTrainingView.jsx`)
-- Workstation hardware inspector detecting GPU compute capability, total VRAM, and thermal headroom.
-- Generates **3 distinct, tailored recommendations**:
-  1. **Balanced (Recommended):** ResNet-18, CUDA (`cuda:0`), Mixed Precision (FP16 AMP), batch size 16, 5 epochs, 4 workers, estimated duration 3.8 - 4.6 mins.
-  2. **High-Capacity / More Time:** EfficientNet-B0, CUDA, FP16, batch size 8, 8 epochs, estimated duration 7.2 - 9.0 mins.
-  3. **Fast / Low-Resource:** MobileNetV3-Large, CUDA, FP16, batch size 32, 3 epochs, estimated duration 1.5 - 2.2 mins.
-- **Dynamic Role for EfficientNet-B0:** Evaluated dynamically based on real-time VRAM headroom (e.g. `HIGH_CAPACITY_CANDIDATE` on $\ge 10\text{GB}$, `HIGH_LOAD` on $6\text{GB}$, `UNSAFE` on $<4\text{GB}$ or CPU).
-- Explicit modal confirmation required prior to dispatching training.
+### 4. Module 8: Resource-Aware Training Recommendations (`HospitalStartTrainingView.jsx`)
+- Up to three options generated for this machine and dataset: **Recommended**, **High-Capacity** (labelled **Not Recommended** when it exceeds the time budget or the dataset is too small for that model tier), and **Fast**. Each shows device, precision, batch size, epochs, workers, estimated time range, measured memory, rationale and trade-off.
+- A table of all 8 architectures with tier, parameters, status (e.g. EfficientNet-B0 is always listed), batch size, epochs, time and memory.
+- Each option also shows a **same-tier alternative** (e.g. Recommended ResNet-50 / alternative EfficientNet-B0).
+- **Manual Configuration** panel: any feasible model, a batch size up to the largest one Module 8 measured as safe for it, and 1-40 epochs, with a live **load meter** (GPU memory or RAM, training time vs Module 8's time budget, CPU used by data loading; each bar says whether it is measured or estimated).
+- **Nothing is pre-selected or started automatically**: the operator must pick one option and confirm in a modal.
+- Optional link to a backend training request (join with "Participate"); only aggregate progress is reported.
 
-### 5. Module 7: Local Training Monitor (`TrainingMonitorView.jsx`)
-- Real-time training progress tracking: epoch counter, batch step progress bar, elapsed time, and ETA.
-- Multi-curve loss tracker (training loss vs validation loss) and accuracy curves.
-- Live hardware telemetry gauges (VRAM MB, GPU %, RAM GB, CPU %).
-- Dynamic OOM / adaptation event logger.
-- Live STDOUT telemetry execution stream.
+### 5. Module 7: Local Training Monitor (`HospitalTrainingMonitorView.jsx`)
+- Job status, epoch progress, elapsed time and an ETA derived from the measured average epoch time.
+- Live per-epoch train/validation loss and accuracy curves (parsed from Module 7's per-epoch output lines) and the full execution log.
+- Terminate button (stops the whole local training process tree).
 
-### 6. Module 7 & 9: Training Result & Federation Handoff (`TrainingResultView.jsx`)
-- Comprehensive execution audit: validation accuracy (91.4%), test accuracy (90.8%), ROC-AUC (0.952).
-- Local checkpoint verification: file path, size (44.7 MB), and SHA-256 integrity digest.
-- **Module 9 FederationHandoff Bundle:** Packages model delta weights, client sample count ($N=4,192$), and differential privacy noise metadata for Flower / FedAvg with cryptographic zero-raw-images certification.
+### 6. Module 7 & 9: Training Result & Federation Handoff (`HospitalTrainingResultView.jsx`)
+- Validation and held-out test accuracy/loss/F1, macro ROC-AUC and average precision, per-class metrics and the confusion matrix from `<model_id>_training_result.json`.
+- The evaluation plots generated by Module 7 (confusion matrix, ROC and precision-recall curves).
+- Module 8 resource statistics (peak VRAM/RAM, CPU, GPU utilization when available, throughput, estimated vs actual time, OOM events, batch adaptations).
+- Module 9 card: the FederationHandoff prepared locally by Module 7 (no images); transmission/aggregation is pending in Module 9.
+- Run history table and a raw-JSON audit inspector.
 
-### 7. Module 6: Approved Model Registry (`ModelsView.jsx`)
-- Consortium-approved architecture library (ResNet-18, EfficientNet-B0, DenseNet-121, MobileNetV3-Large).
-- Architectural specification inspector: target input tensor shape, parameter count, file size, class mapping, and SHA-256 checksums.
+### 7. Module 6: Local Model Registry (`HospitalModelsView.jsx`)
+- Every trained version in the Module 6 store: architecture, version, parameters, size, input spec, class mapping, training settings and artifact SHA-256 (verified on load). Module 15 approval is shown as pending.
 
-### 8. Module 16: Zero-Leakage Local Inference (`InferenceView.jsx`)
-- Local inference workstation allowing clinical radiomics staff to test scans against approved local checkpoints.
-- Probability distribution breakdown across clinical classes (Normal vs Bacterial vs Viral Pneumonia) with confidence scoring.
-- Zero-Egress Privacy Certificate and diagnostic decision-support disclaimer.
-
+### 8. Module 16: Local Inference (`HospitalInferenceView.jsx`)
+- Select a model and an explicit version, a device (auto/CUDA/CPU) and a local image; the image is sent only to 127.0.0.1, processed with the model's own preprocessing spec, and its temporary copy is deleted after the prediction.
+- Predicted class, uncalibrated softmax confidence, full class probability distribution, timing, warnings, and the "model prediction, not a clinical diagnosis" notice.
 ### 9. Module 18: Communications & Notifications (`CommunicationView.jsx`)
 - Consortium notifications inbox (round invitations, global model release alerts, sentinel health checks).
 - Secure operator dispatch chat channel with consortium lead investigators.
@@ -155,57 +159,39 @@ Module 3 enforces the strict security rules of Module 1:
 
 ## 5. Verification & Automated Test Suite
 
-Module 3 includes 24 automated unit and integration tests executing against Node's native test runner (`node --test`).
+The mock-service unit tests of the old `frontend/hospital-desktop/` app (`node --test`) were removed
+together with that app and its mock services. The integrated behaviour is covered by:
 
-### Running the Test Suite
-```powershell
-cd C:\Users\Admin\Desktop\Major-Project\frontend\hospital-desktop
-npm test
-```
-
-### Test Coverage Summary
 ```text
-✔ Module 1 - AuthService: should authenticate valid hospital operator (HOSP_000001)
-✔ Module 1 - AuthService: should reject researcher role from accessing hospital app
-✔ Module 1 - AuthService: should reject invalid credentials
-✔ Module 4 - DatasetService: should return valid dataset summary with zero patient overlap
-✔ Module 4 - DatasetService: should identify corrupted and duplicate scans
-✔ Module 5 - PreprocessingService: should execute pipeline and produce normalized tensors
-✔ Module 5 - PreprocessingService: should verify zero leakage between train and val splits
-✔ Module 8 - ResourceService: should profile workstation GPU hardware (RTX 3080 Ti)
-✔ Module 8 - ResourceService: should produce 3 distinct training recommendations
-✔ Module 8 - ResourceService: should dynamically evaluate EfficientNet-B0 based on VRAM
-✔ Module 7 - TrainingService: should generate valid immutable TrainingConfig
-✔ Module 7 - TrainingService: should stream batch progress and loss metrics
-✔ Module 7 - TrainingService: should package FederationHandoff bundle with zero raw images
-✔ Module 6 - ModelService: should list approved models with valid SHA-256 checksums
-✔ Module 16 - InferenceService: should execute zero-leakage local inference
-... (24 passed, 0 failed)
+python -m pytest hospital_client/local_api -q                 # local ML service: auth, origin checks,
+                                                              # input validation, real M4->M5 run,
+                                                              # job cancel, temp-file cleanup
+python -m pytest hospital_client -q                           # full Member 1 suite (771 passed, 1 skipped)
+cd backend && npm test                                        # includes tests/api/training_progress.test.js (81 passed)
+cd frontend && npx vite build                                 # frontend compiles
 ```
+
+A browser end-to-end run (2026-09-27, synthetic images, in-memory MongoDB) covered: hospital login,
+locate dataset -> automatic M4/M5/M8, explicit recommendation choice, training with live curves,
+terminate, results with plots, local inference, backend progress for a linked training request, and
+every hospital and researcher screen loading without console errors.
 
 ---
 
 ## 6. How to Run Locally
 
 ### Prerequisites
-- Node.js >= 18.0.0
-- npm >= 9.0.0
+- Node.js >= 20.19, npm >= 9 (full setup: root `README.md`)
+- Python environment with `pip install -r requirements.txt`
+- `backend/.env` and `frontend/.env` (see `backend/.env.example`; frontend needs `VITE_API_URL` and `VITE_ML_API_URL`)
 
-### Installation & Execution
+### Start the three processes
 ```powershell
-# 1. Navigate to Module 3 directory
-cd C:\Users\Admin\Desktop\Major-Project\frontend\hospital-desktop
-
-# 2. Install dependencies (if not already installed)
-npm install
-
-# 3. Start development server
-npm run dev
+cd backend;  npm install; npm start            # REST API on http://localhost:5000/api/v1
+python -m hospital_client.local_api            # local ML service on http://127.0.0.1:8765 (repo root)
+cd frontend; npm install; npm run dev          # app on http://localhost:5173
 ```
 
-The application runs at **`http://localhost:5174`** (or next available port).
-
-### Default Authorized Clinical Operator Credentials
-- **Email:** `operator@stjude-clinical.org`
-- **Password:** `hospital123`
-- **Assigned Hospital:** `HOSP_000001` (St. Jude Clinical Research & AI Node)
+Sign in with a hospital operator account from the backend database. The local ML service verifies
+the session with the backend (`GET /auth/me`) and only accepts `hospital_operator` accounts.
+Generated ML outputs go to `ML_WORK_DIR` (default `~/medfl_ml_work`), never into the dataset folder.
