@@ -30,6 +30,7 @@ def to_training_config(
     canonical_base_model_id: str = None,
     canonical_base_model_version: int = None,
     canonical_base_model_checksum: str = None,
+    proximal_mu: float = 0.0,
 ) -> TrainingConfig:
     input_size = get_architecture_info(recommendation.architecture).default_input_size
     model_config = ModelConfig(
@@ -46,4 +47,5 @@ def to_training_config(
         canonical_base_model_id=canonical_base_model_id,
         canonical_base_model_version=canonical_base_model_version,
         canonical_base_model_checksum=canonical_base_model_checksum,
+        proximal_mu=proximal_mu,
     )

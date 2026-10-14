@@ -74,3 +74,9 @@ class UpdateValidator:
                 actual_val = handoff.training_configuration[key]
                 if actual_val != expected_val:
                     raise ValueError(f"Training requirement mismatch for {key}: expected {expected_val}, got {actual_val}")
+
+        # 8. FedProx: the update must report training with the job's proximal term (a missing value is not enough).
+        mu = job.training_requirements.get("proximal_mu")
+        if mu and handoff.training_configuration.get("proximal_mu") != mu:
+            raise ValueError(f"FedProx job requires proximal_mu={mu}; the update was trained with "
+                             f"{handoff.training_configuration.get('proximal_mu')}.")

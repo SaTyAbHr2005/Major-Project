@@ -10,6 +10,7 @@ hardware to choose them. A future Module 8 "ResolvedTrainingConfig" is
 expected to just populate these same fields before handing this object (or
 an equivalent one) to Module 7.
 """
+import math
 from dataclasses import dataclass, field
 from typing import Optional, Dict
 
@@ -101,6 +102,11 @@ class TrainingConfig:
     canonical_base_model_version: Optional[int] = None
     canonical_base_model_checksum: Optional[str] = None
 
+    # FedProx (Module 9 strategy): weight mu of the proximal term (mu/2)*||w - w_start||^2
+    # that keeps local training close to the model the round started from.
+    # 0.0 = no proximal term (plain FedAvg local training, the unchanged default).
+    proximal_mu: float = 0.0
+
     def to_dict(self) -> dict:
         return {
             "model_id": self.model_id,
@@ -139,6 +145,7 @@ class TrainingConfig:
             "canonical_base_model_id": self.canonical_base_model_id,
             "canonical_base_model_version": self.canonical_base_model_version,
             "canonical_base_model_checksum": self.canonical_base_model_checksum,
+            "proximal_mu": self.proximal_mu,
         }
 
 
@@ -222,3 +229,6 @@ def validate_training_config(config: TrainingConfig) -> None:
         raise ValueError(f"validate_every must be an integer >= 1, got {config.validate_every!r}")
     if not isinstance(config.random_seed, int):
         raise ValueError(f"random_seed must be an integer, got {config.random_seed!r}")
+    if (not isinstance(config.proximal_mu, (int, float)) or isinstance(config.proximal_mu, bool)
+            or not math.isfinite(config.proximal_mu) or config.proximal_mu < 0):
+        raise ValueError(f"proximal_mu must be a finite number >= 0, got {config.proximal_mu!r}")

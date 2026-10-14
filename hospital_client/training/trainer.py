@@ -68,6 +68,8 @@ class Trainer:
         # class_order) from the SAME pass that produced result.test_metrics. Used by
         # training.plots for ROC/PR curves; never written into TrainingResult.
         self.test_outputs = None
+        # FedProx anchor: the weights training started from (set in run() when proximal_mu > 0).
+        self._prox_anchor = None
 
     def run(self) -> TrainingResult:
         config = self.config
@@ -123,6 +125,10 @@ class Trainer:
             model.load_state_dict(loaded_base.state_dict())
             del loaded_base, stored_params  # free memory before training starts
         # ── End canonical base model section ──
+        # FedProx: remember the starting (round base) weights before any resume or training step;
+        # _run_epoch adds (mu/2)*||w - anchor||^2 to the training objective.
+        if config.proximal_mu > 0:
+            self._prox_anchor = [p.detach().clone() for p in model.parameters()]
         optimizer = self._build_optimizer(model)
         scheduler = self._build_scheduler(optimizer)
         # GradScaler with enabled=False is a documented no-op passthrough (PyTorch AMP docs),
@@ -339,9 +345,15 @@ class Trainer:
                     outputs = model(images)
                     loss = loss_fn(outputs, labels)
                 if train_mode:
+                    objective = loss
+                    if self._prox_anchor is not None:
+                        # FedProx proximal term, in fp32 outside autocast. Reported loss/metrics stay
+                        # the plain classification loss so runs with and without FedProx compare directly.
+                        objective = loss + (self.config.proximal_mu / 2) * sum(
+                            (p.float() - a.float()).pow(2).sum() for p, a in zip(model.parameters(), self._prox_anchor))
                     # scaler with enabled=False (FP32) is a documented no-op passthrough:
                     # scale()/step()/update() behave exactly like plain backward()/step().
-                    scaler.scale(loss).backward()
+                    scaler.scale(objective).backward()
                     scaler.step(optimizer)
                     scaler.update()
                 batch_size = labels.size(0)

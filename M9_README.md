@@ -247,6 +247,7 @@ The authoritative logic resides in:
 - `frontend/src/views/AdminFederationModelsView.jsx`
 - `federation/base_models.py` (round base model, added 2026-10-09)
 - `frontend/src/views/FederatedTrainingView.jsx`, `frontend/src/components/federation/AggregateRoundDialog.jsx`
+- `federation/round_plan.py` (round plan, early stopping), `federation/flower_sim.py` (Flower simulation bench), added 2026-10-14
 - `backend/src/services/notificationService.js`, `backend/src/routes/notificationRoutes.js`, `backend/src/models/Notification.js`
 
 ## 22. Round Notifications (Module 18 integration)
@@ -255,7 +256,7 @@ The backend (`backend/src/services/notificationService.js`) stores one notificat
 
 | Event | Who is notified | Type |
 |---|---|---|
-| Admin opens a round | every active hospital | `ROUND_OPEN` |
+| Admin opens a round, or the round plan opens the next one after aggregation | every active hospital | `ROUND_OPEN` |
 | Admin aggregates a round successfully | every active hospital that did **not** join that round | `ROUND_CLOSED` (do not train for this round; you will be notified when the next one opens) |
 
 - Hospitals read them with `GET /api/v1/notifications` and mark them read with `POST /api/v1/notifications/read` (their own hospital only).
@@ -266,3 +267,70 @@ The backend (`backend/src/services/notificationService.js`) stores one notificat
 **PASS** — The currently implemented Module 9 federation architecture has been verified against its defined architectural requirements, including hospital participation and authorization, canonical base-model provenance, update validation, weighted aggregation, Global Model creation, persistence, dynamic participant provenance, and Admin-side Global Model retrieval/evaluation integration.
 
 M9 is the completed federation lifecycle and aggregation foundation for the current project scope. Privacy-enhancing mechanisms, enhanced secure-transport protections, Byzantine/malicious-update detection, and advanced telemetry remain outside the current M9 implementation and are reserved for subsequent modules.
+
+## 24. Round Plan, FedProx and the Flower Simulation Bench (added 2026-10-14)
+
+These close the gaps between Module 9 and the implementation plan (Flower workflow, simulation
+with several hospital clients, repeated rounds with a stopping criterion, FedProx).
+
+### 24.1 Round plan (application protocol)
+Stored in the job's existing JSON fields, validated when the job is created (`federation/round_plan.py`):
+
+| Setting | Where | Meaning |
+|---|---|---|
+| `strategy` | `aggregation_configuration` | `fedavg` (default) or `fedprox` |
+| `total_rounds` | `aggregation_configuration` | Planned number of rounds. Absent = open-ended (previous behaviour). |
+| `auto_continue` | `aggregation_configuration` | Open the next round automatically after a successful aggregation. Defaults to on when `total_rounds` is set. |
+| `round_duration_hours` | `aggregation_configuration` | Deadline of an automatically opened round. Required with `auto_continue`. |
+| `early_stopping` | `aggregation_configuration` | Optional `{metric: accuracy\|f1, min_delta, patience}`: stop when the evaluated global model has not improved by `min_delta` for `patience` rounds in a row. |
+| `proximal_mu` | `training_requirements` | FedProx weight (> 0, required for `fedprox`). |
+
+- After aggregation the adapter applies the plan: with early stopping it first evaluates the new
+  global model (only evaluated rounds count); when the plan is finished the job becomes `COMPLETED`;
+  otherwise, with `auto_continue`, round N+1 opens from the new global model and the backend sends
+  `ROUND_OPEN` to every active hospital. The `aggregate` response carries `plan`, `next_round` and `warnings`.
+- `create_round` refuses rounds beyond `total_rounds` or after the job finished. Opening the first
+  round moves the job from `CREATED` to `ACTIVE`.
+- `list_jobs` / `get_job_details` include `plan` (rounds completed, next round number, scores, finished, reason).
+- Admin UI: the job form sets total rounds, round duration and early stopping. It does not offer the strategy:
+  jobs created there use FedAvg. FedProx is a research setting (choosing it needs knowledge of how different the
+  hospitals' data are), available through the API (`aggregation_configuration.strategy`) and the Flower bench.
+- Hospitals still train when they choose; "automatic" means the server side (open → collect →
+  aggregate → open next) needs no admin action except the aggregate step, which stays an admin decision.
+
+### 24.2 FedProx
+- Module 7 `TrainingConfig.proximal_mu` adds `(mu/2)·||w − w_start||²` over the trainable weights
+  to the local training objective, where `w_start` is the round's base model. Reported loss and
+  metrics stay the plain classification loss. `0` (default) = unchanged FedAvg training.
+- The hospital local service passes the job's `proximal_mu` to Module 8/7 (`--proximal-mu`).
+- `UpdateValidator` rejects an update of a FedProx job whose training did not use the job's `proximal_mu`.
+- Server aggregation is the same sample-weighted average; the global model's `aggregation_metadata`
+  records `strategy` and `proximal_mu`.
+
+### 24.3 Flower simulation bench (`federation/flower_sim.py`)
+A real Flower server (`flwr.server.start_server`, Flower's own `FedAvg`/`FedProx` strategies) and N
+client processes (`flwr.client.start_client`) exchanging parameters over gRPC on 127.0.0.1. No Ray.
+
+```
+python -m federation.flower_sim --dataset <Module 5 output dir> --output <results dir> \
+    --clients 3 --rounds 5 --partition label_skew --alpha 0.5 \
+    --strategy fedprox --mu 0.01 --architecture resnet18 --epochs 1 --batch-size 32 --device cuda --seed 42
+```
+- Partition: `iid` (seeded shuffle) or `label_skew` (Dirichlet(alpha) share of every class per client).
+  Every train/validation record goes to exactly one client; client manifests reference the original files.
+- Clients train with the unchanged Module 7 Trainer from the round's global model (checksum-verified
+  base-model path), one at a time (shared lock) so a 4 GB GPU is enough.
+- The server evaluates the global model on the Module 5 test split after every round (round 0 = start model).
+- Output: `results.json` (configuration incl. seed, partition class counts, per-round test metrics,
+  client metrics, round durations, bytes exchanged) and `rounds.csv`.
+- Limitations: records are split individually (patient groups are not kept together); Flower's FedAvg
+  averages BatchNorm's integer counters (the application protocol copies them from the first participant);
+  fixed number of rounds (no early stopping in the bench); `start_server`/`start_client` are deprecated
+  since Flower 1.13 but need no extra services.
+
+The application protocol (sections 3-22) is unchanged in its trust model: hospitals still submit
+through the backend, and the cross-machine submission limitation in section 20 still applies.
+Flower is used for the simulation bench and experiments, not for the hospital desktop flow.
+
+Tests: `federation/tests/test_round_plan.py` (23), `federation/tests/test_flower_sim.py` (11, including a failing-client run and a
+real 2-client FedProx Flower run), `hospital_client/training/tests/test_fedprox.py` (8).

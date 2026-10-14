@@ -955,6 +955,9 @@ def r_federated_train(h, m, q):
     epochs = reqs.get("epochs")
     if epochs is not None:
         cmd.extend(["--epochs", str(epochs)])
+    # FedProx jobs set the proximal term weight; Module 9 rejects updates trained with another value.
+    if reqs.get("proximal_mu"):
+        cmd.extend(["--proximal-mu", str(reqs["proximal_mu"])])
     
     round_id = body.get("round_id")
     auth_token = body.get("auth_token")

@@ -53,6 +53,8 @@ def main():
     train_parser.add_argument("--canonical-base-model-id", default=None, help="Round-prescribed base model ID")
     train_parser.add_argument("--canonical-base-model-version", type=int, default=None, help="Round-prescribed base model version")
     train_parser.add_argument("--canonical-base-model-checksum", default=None, help="Round-prescribed base model checksum")
+    train_parser.add_argument("--proximal-mu", type=float, default=0.0,
+                              help="FedProx proximal term weight from the federation job (0 = plain FedAvg training)")
     train_parser.add_argument("--architecture-subdir", action="store_true",
                               help="Write this run's outputs under <output>/<chosen architecture>/ (the throughput "
                                    "history stays in <output>, shared by all architectures)")
@@ -112,6 +114,7 @@ def main():
                 canonical_base_model_id=args.canonical_base_model_id,
                 canonical_base_model_version=args.canonical_base_model_version,
                 canonical_base_model_checksum=args.canonical_base_model_checksum,
+                proximal_mu=args.proximal_mu,
             )
             print(f"Starting Module 7 training: {chosen.label} - {chosen.display_name}, {chosen.device}/{chosen.precision}, "
                   f"batch_size={chosen.batch_size}, epochs={chosen.epochs} (estimated {chosen.estimated_training_time_display})",

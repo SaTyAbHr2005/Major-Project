@@ -45,8 +45,8 @@ Dataset ingestion/inspection (Module 4); preprocessing, splitting, manifest
 generation (Module 5); model architecture definitions, artifact storage,
 versioning (Module 6 - reused, not duplicated); hardware detection or
 resource-aware model/batch-size/device selection (Module 8); Flower,
-FedAvg/FedProx, federated aggregation, or any network transmission (Module
-9); differential privacy (Module 10); TLS/secure communication (Module 11);
+FedAvg/FedProx strategies, federated aggregation, or any network transmission (Module
+9; Module 7 only provides FedProx's local proximal term, `proximal_mu`, see section 7); differential privacy (Module 10); TLS/secure communication (Module 11);
 Byzantine/malicious-update detection (Module 12); platform-wide model
 governance (Module 15); inference/prediction execution (Module 16);
 desktop/mobile UI, notifications (Modules 2/3/17/18). Verified by `grep` -
@@ -131,7 +131,10 @@ accepts `model_id`, a Module 6 `ModelConfig`, `dataset_dir`, `output_dir`,
 `device`, `precision`, `epochs`, `batch_size`, `learning_rate`,
 `weight_decay`, `optimizer`, `scheduler` (+ per-scheduler parameters),
 early-stopping settings, `class_weighting`, `num_workers`, `random_seed`,
-and `resume`. `validate_training_config()` reuses Module 6's
+`resume`, and `proximal_mu` (added 2026-10-14: FedProx's local term
+`(mu/2)*||w - w_start||^2` over the trainable weights, `w_start` = the weights
+training started from, normally the round's base model; reported loss stays the
+plain classification loss; `0` = unchanged training; tests in `tests/test_fedprox.py`). `validate_training_config()` reuses Module 6's
 `validate_model_config()` rather than duplicating it.
 
 **Module 8 boundary**: `device`/`batch_size`/`epochs`/`learning_rate` are

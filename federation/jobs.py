@@ -1,6 +1,7 @@
 from typing import Dict, List, Any, Optional
 from .models import FederationJob, JobStatus, now_iso
 from .storage import FederationStorage
+from .round_plan import validate_plan
 
 class JobManager:
     def __init__(self, storage: FederationStorage):
@@ -21,6 +22,7 @@ class JobManager:
         
         if self.storage.get_job(federation_job_id) is not None:
             raise ValueError(f"Job {federation_job_id} already exists.")
+        validate_plan(aggregation_configuration, training_requirements)
             
         job = FederationJob(
             federation_job_id=federation_job_id,

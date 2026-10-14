@@ -150,7 +150,12 @@ class Aggregator:
             round_id=round_id,
             source_update_ids=[u.update_id for u, _ in handoffs],
             aggregation_method="weighted_fedavg",
-            aggregation_metadata={"total_samples": total_samples, "non_float_policy": "first_participant"},
+            # FedProx changes only the hospitals' local objective; the server average is the same.
+            aggregation_metadata={
+                "total_samples": total_samples, "non_float_policy": "first_participant",
+                "strategy": (job.aggregation_configuration or {}).get("strategy", "fedavg"),
+                "proximal_mu": (job.training_requirements or {}).get("proximal_mu"),
+            },
             class_mapping=job.class_mapping,
             schema_hash=schema_hash,
             status=GlobalModelStatus.EVALUATION_PENDING

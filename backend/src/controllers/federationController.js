@@ -44,10 +44,14 @@ const callPythonAdapter = (payload) => {
   });
 };
 
+// The architecture catalogue is fixed in code, and building it imports PyTorch (~7 s),
+// so it is fetched once per backend process.
+let architecturesCache = null;
+
 exports.getArchitectures = async (req, res) => {
   try {
-    const result = await callPythonAdapter({ action: 'get_architectures' });
-    res.json(result);
+    architecturesCache = architecturesCache || await callPythonAdapter({ action: 'get_architectures' });
+    res.json(architecturesCache);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -95,17 +99,18 @@ exports.createJob = async (req, res) => {
   }
 };
 
+const notifyRoundOpen = (rnd) => notifyHospitals({
+  type: 'ROUND_OPEN',
+  title: `Round ${rnd.round_number} of ${rnd.federation_job_id} is open`,
+  content: `Federation job ${rnd.federation_job_id} opened round ${rnd.round_number}. It accepts model updates until ${rnd.deadline}. `
+    + 'To take part, start federated training for this job under Federation Status.',
+  job_id: rnd.federation_job_id, round_id: rnd.round_id,
+});
+
 exports.createRound = async (req, res) => {
   try {
     const result = await callPythonAdapter({ action: 'create_round', ...req.body });
-    const rnd = result.round;
-    if (rnd) result.notified_hospitals = await notifyHospitals({
-      type: 'ROUND_OPEN',
-      title: `Round ${rnd.round_number} of ${rnd.federation_job_id} is open`,
-      content: `Federation job ${rnd.federation_job_id} opened round ${rnd.round_number}. It accepts model updates until ${rnd.deadline}. `
-        + 'To take part, start federated training for this job under Federation Status.',
-      job_id: rnd.federation_job_id, round_id: rnd.round_id,
-    });
+    if (result.round) result.notified_hospitals = await notifyRoundOpen(result.round);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -180,6 +185,8 @@ exports.aggregateRound = async (req, res) => {
         + 'Do not start federated training for this round. You will be notified when the next round opens.',
       job_id: rnd.federation_job_id, round_id: rnd.round_id,
     });
+    // The job's round plan may have opened the next round automatically.
+    if (result.next_round) result.notified_next_round = await notifyRoundOpen(result.next_round);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

@@ -61,7 +61,7 @@ Where they disagree with the module docs, the module docs and the code are curre
 | 6 | Model management | Implemented | 8 architectures, versioned safetensors checkpoints, integrity checks |
 | 7 | Local training | Implemented | One PyTorch trainer for every architecture, metrics, plots, federation handoff |
 | 8 | Resource-aware training | Implemented | Hardware detection, per-model memory/time estimates with a real dry run, recommendations, OOM retry |
-| 9 | Federated learning | Implemented (custom protocol, not Flower) | Jobs, rounds, base-model distribution, update validation, weighted FedAvg, global models, evaluation, promotion |
+| 9 | Federated learning | Implemented (custom protocol for the app + Flower simulation bench) | Jobs, rounds, base-model distribution, update validation, weighted FedAvg, FedProx, round plan (total rounds, early stopping, automatic next round), global models, evaluation, promotion; `python -m federation.flower_sim` runs Flower with N simulated hospitals (IID / label-skew) |
 | 10 | Differential privacy | Not implemented | |
 | 11 | Secure communication | Not implemented | Local services use plain HTTP on localhost; no TLS/mTLS |
 | 12 | Byzantine/malicious update detection | Not implemented | Module 9 has a hook that currently accepts every update |
