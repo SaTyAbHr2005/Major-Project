@@ -81,6 +81,10 @@ class FederationParticipant:
     participation_status: str = "EXPECTED"
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
+    # Join request (federation/participation.py): the hospital's own eligibility summary and the admin decision.
+    eligibility: Dict[str, Any] = field(default_factory=dict)
+    decision_reason: str = ""
+    decided_by: str = ""
 
 @dataclass
 class FederationRound:

@@ -311,18 +311,30 @@ describe('GET /api/v1/federation/jobs', () => {
     expect(res.status).toBe(401);
   });
 
-  test('Hospital Alpha → 403 (admin only)', async () => {
-    const res = await request(app)
-      .get('/api/v1/federation/jobs')
-      .set('Authorization', `Bearer ${HOSP_ALPHA()}`);
-    expect(res.status).toBe(403);
-  });
-
-  test('Hospital Beta → 403 (admin only)', async () => {
+  // Hospitals list jobs to check eligibility and request to join (route allows ADMIN and HOSPITAL_OPERATOR).
+  test('Hospital → 200, and it sees only its own join request', async () => {
+    adapterReturns({ success: true, jobs: [{ federation_job_id: 'JOB1', rounds: [], participants: [
+      { hospital_identifier: 'HOSP-ALPHA', authorization_status: 'APPROVED', eligibility: { train_sample_count: 10 } },
+      { hospital_identifier: 'HOSP-BETA', authorization_status: 'PENDING', eligibility: { train_sample_count: 99 } },
+    ] }] });
     const res = await request(app)
       .get('/api/v1/federation/jobs')
       .set('Authorization', `Bearer ${HOSP_BETA()}`);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(200);
+    expect(res.body.jobs[0].participants).toBeUndefined();
+    expect(res.body.jobs[0].my_participation).toMatchObject({ hospital_identifier: 'HOSP-BETA', authorization_status: 'PENDING' });
+  });
+
+  test('Hospital with no request gets my_participation = null', async () => {
+    adapterReturns({ success: true, jobs: [{ federation_job_id: 'JOB1', rounds: [], participants: [
+      { hospital_identifier: 'HOSP-BETA', authorization_status: 'PENDING', eligibility: {} },
+    ] }] });
+    const res = await request(app)
+      .get('/api/v1/federation/jobs')
+      .set('Authorization', `Bearer ${HOSP_ALPHA()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.jobs[0].my_participation).toBeNull();
+    expect(res.body.jobs[0].participants).toBeUndefined();
   });
 
   test('Researcher → 403 (admin only)', async () => {
@@ -1062,3 +1074,75 @@ describe('GET /api/v1/federation/models — Global Model listing', () => {
   });
 });
 
+// ═════════════════════════════════════════════════════════════════════════════
+// Participation requests: hospital asks with its eligibility summary, admin decides
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe('Federation participation requests', () => {
+  const Hospital = require('../../src/authentication/models/Hospital');
+  const Notification = require('../../src/models/Notification');
+  const ELIG = { eligible: true, train_sample_count: 400 };
+
+  test('Hospital request uses the authenticated hospital id, not one from the body', async () => {
+    adapterReturns({ success: true, participant: { hospital_identifier: 'HOSP-ALPHA', authorization_status: 'PENDING' } });
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/participation-request')
+      .set('Authorization', `Bearer ${HOSP_ALPHA()}`)
+      .send({ eligibility: ELIG, participant_id: 'HOSP-BETA' });
+    expect(res.status).toBe(200);
+    expect(lastSpawnPayload).toEqual({ action: 'request_participation', job_id: 'JOB1', participant_id: 'HOSP-ALPHA', eligibility: ELIG });
+  });
+
+  test('Refused request (e.g. not eligible) → 400 with the reason', async () => {
+    adapterReturns({ success: false, error: 'Your local eligibility check says this dataset is not eligible for the job.' });
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/participation-request')
+      .set('Authorization', `Bearer ${HOSP_ALPHA()}`)
+      .send({ eligibility: { eligible: false } });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not eligible/);
+  });
+
+  test.each([['admin', () => ADMIN()], ['researcher', () => RESEARCHER()]])('%s cannot request on behalf of a hospital → 403', async (_, token) => {
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/participation-request')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ eligibility: ELIG });
+    expect(res.status).toBe(403);
+    expect(lastSpawnPayload).toBeNull();
+  });
+
+  test('Admin approval reaches M9 and notifies only that hospital', async () => {
+    adapterReturns({ success: true, participant: { hospital_identifier: 'HOSP-BETA', authorization_status: 'APPROVED' } });
+    Hospital.find.mockResolvedValueOnce([{ hospital_id: 'HOSP-BETA' }]);
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/participants/HOSP-BETA/decision')
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ decision: 'approved' });
+    expect(res.status).toBe(200);
+    expect(lastSpawnPayload).toEqual({ action: 'decide_participation', job_id: 'JOB1', participant_id: 'HOSP-BETA',
+      decision: 'APPROVED', reason: '', admin_id: 'USR_adm0001' });
+    expect(Hospital.find.mock.calls[0][0]).toEqual({ status: 'active', hospital_id: { $in: ['HOSP-BETA'] } });
+    expect(Notification.insertMany.mock.calls[0][0]).toEqual([
+      expect.objectContaining({ hospital_id: 'HOSP-BETA', type: 'PARTICIPATION_APPROVED', job_id: 'JOB1' }),
+    ]);
+  });
+
+  test.each([['hospital', () => HOSP_ALPHA()], ['researcher', () => RESEARCHER()]])('%s cannot decide → 403', async (_, token) => {
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/participants/HOSP-ALPHA/decision')
+      .set('Authorization', `Bearer ${token()}`)
+      .send({ decision: 'APPROVED' });
+    expect(res.status).toBe(403);
+    expect(lastSpawnPayload).toBeNull();
+  });
+
+  test('Joining a round without approval → 403 with the reason', async () => {
+    adapterReturns({ success: false, error: 'Hospital HOSP-ALPHA is waiting for admin approval for job JOB1; it cannot join this job\'s rounds.' });
+    const res = await request(app)
+      .post('/api/v1/federation/jobs/JOB1/rounds/R1/participate')
+      .set('Authorization', `Bearer ${HOSP_ALPHA()}`);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/waiting for admin approval/);
+  });
+});

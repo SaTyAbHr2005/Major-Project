@@ -50,5 +50,9 @@ export const promoteModel = (globalModelId, evalRecordId) => request('POST', '/m
 
 // ── Hospital: Own federation status ─────────────────────────
 export const getHospitalFederationStatus = () => request('GET', '/hospital-status');
+// Join requests: the hospital sends its local eligibility summary; the admin approves or rejects.
+export const requestParticipation = (jobId, eligibility) => request('POST', `/jobs/${encodeURIComponent(jobId)}/participation-request`, { eligibility });
+export const decideParticipation = (jobId, hospitalId, decision, reason = '') =>
+  request('POST', `/jobs/${encodeURIComponent(jobId)}/participants/${encodeURIComponent(hospitalId)}/decision`, { decision, reason });
 export const registerParticipant = (jobId, roundId) => request('POST', `/jobs/${encodeURIComponent(jobId)}/rounds/${encodeURIComponent(roundId)}/participate`);
 export const submitHandoff = (jobId, roundId, handoffDir) => request('POST', `/jobs/${encodeURIComponent(jobId)}/rounds/${encodeURIComponent(roundId)}/submit`, { handoff_dir: handoffDir });

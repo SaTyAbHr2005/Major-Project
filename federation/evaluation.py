@@ -85,6 +85,7 @@ class EvaluationManager:
         y_true = []
         y_pred = []
         class_names = []
+        failed = []   # (image, reason) for images the engine could not process
         
         # Expected structure: evaluation_datasets/{task}/{version}/{class_name}/img.jpg
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff')
@@ -106,9 +107,18 @@ class EvaluationManager:
                         y_pred.append(pred)
                         y_true.append(class_name)
                     else:
-                        pass # Handle failed inferences if needed
-                        
+                        failed.append((os.path.relpath(img_path, dataset_path), result.error_category or result.status.value))
+
         engine.close()
+
+        # Metrics over only the images that worked would overstate (or understate) the model on the
+        # evaluation set, so any failed image stops the evaluation and is reported.
+        if failed:
+            examples = "; ".join(f"{name} ({reason})" for name, reason in failed[:5])
+            raise ValueError(
+                f"Evaluation stopped: {len(failed)} of {len(failed) + len(y_true)} evaluation images could not be "
+                f"processed, so no metrics were recorded. Fix or remove them from {dataset_path}. "
+                f"First failures: {examples}")
         
         # 5. Calculate Metrics
         sample_count = len(y_true)

@@ -129,6 +129,12 @@ class FederationStorage:
                 cursor.execute("ALTER TABLE global_model_versions ADD COLUMN class_mapping TEXT DEFAULT '{}'")
             except sqlite3.OperationalError:
                 pass
+            # Participation requests (added 2026-10-14)
+            for column in ("eligibility TEXT DEFAULT '{}'", "decision_reason TEXT DEFAULT ''", "decided_by TEXT DEFAULT ''"):
+                try:
+                    cursor.execute(f"ALTER TABLE federation_participants ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass
             try:
                 cursor.execute("ALTER TABLE global_model_versions ADD COLUMN schema_hash TEXT DEFAULT 'LEGACY'")
             except sqlite3.OperationalError:
@@ -220,7 +226,45 @@ class FederationStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('DELETE FROM federation_jobs WHERE federation_job_id = ?', (job_id,))
 
+    # --- FederationParticipant (join requests) ---
+    _PARTICIPANT_COLUMNS = ("participant_id", "federation_job_id", "hospital_identifier", "authorization_status",
+                            "expected_status", "last_submission", "participation_status", "created_at", "updated_at",
+                            "eligibility", "decision_reason", "decided_by")
+
+    def save_participant(self, p: FederationParticipant):
+        values = {**{c: getattr(p, c) for c in self._PARTICIPANT_COLUMNS}, "eligibility": json.dumps(p.eligibility)}
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                f"INSERT OR REPLACE INTO federation_participants ({', '.join(self._PARTICIPANT_COLUMNS)}) "
+                f"VALUES ({', '.join('?' for _ in self._PARTICIPANT_COLUMNS)})",
+                [values[c] for c in self._PARTICIPANT_COLUMNS])
+
+    def _participant(self, row) -> FederationParticipant:
+        data = {c: row[c] for c in self._PARTICIPANT_COLUMNS}
+        data["eligibility"] = json.loads(data["eligibility"] or "{}")
+        data["decision_reason"] = data["decision_reason"] or ""
+        data["decided_by"] = data["decided_by"] or ""
+        return FederationParticipant(**data)
+
+    def get_participant(self, participant_id: str) -> Optional[FederationParticipant]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT * FROM federation_participants WHERE participant_id = ?', (participant_id,)).fetchone()
+            return self._participant(row) if row else None
+
+    def list_participants(self, job_id: str) -> List[FederationParticipant]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute('SELECT * FROM federation_participants WHERE federation_job_id = ? ORDER BY created_at',
+                                (job_id,)).fetchall()
+            return [self._participant(r) for r in rows]
+
     # --- FederationRound ---
+    def list_rounds_for_job(self, job_id: str) -> List[FederationRound]:
+        with sqlite3.connect(self.db_path) as conn:
+            ids = [r[0] for r in conn.execute('SELECT round_id FROM federation_rounds WHERE federation_job_id = ?', (job_id,))]
+        return [self.get_round(i) for i in ids]
+
     def save_round(self, r: FederationRound):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
@@ -376,10 +420,16 @@ class FederationStorage:
         return None
 
     # --- EvaluationRecord and PromotionDecision ---
+    _EVALUATION_COLUMNS = ("evaluation_id", "global_model_id", "model_version", "task", "architecture",
+                           "evaluation_dataset_id", "evaluation_dataset_version", "sample_count", "accuracy", "precision",
+                           "recall", "f1", "per_class_metrics", "confusion_matrix", "predictions_location",
+                           "metrics_location", "inference_configuration", "status", "started_at", "completed_at")
+    _EVALUATION_JSON = ("per_class_metrics", "confusion_matrix", "inference_configuration")
+
     def save_evaluation_record(self, record: EvaluationRecord):
         with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT OR REPLACE INTO evaluation_records 
+            conn.execute(f'''
+                INSERT OR REPLACE INTO evaluation_records ({', '.join(self._EVALUATION_COLUMNS)})
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 record.evaluation_id, record.global_model_id, record.model_version, record.task, record.architecture,
@@ -389,10 +439,31 @@ class FederationStorage:
                 json.dumps(record.inference_configuration), record.status, record.started_at, record.completed_at
             ))
 
+    def _evaluation(self, row) -> EvaluationRecord:
+        data = {c: row[c] for c in self._EVALUATION_COLUMNS}
+        for c in self._EVALUATION_JSON:
+            data[c] = json.loads(data[c]) if data[c] else ({} if c != "confusion_matrix" else [])
+        return EvaluationRecord(**data)
+
+    def get_evaluation_record(self, evaluation_id: str) -> Optional[EvaluationRecord]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT * FROM evaluation_records WHERE evaluation_id = ?', (evaluation_id,)).fetchone()
+            return self._evaluation(row) if row else None
+
+    def get_latest_evaluation(self, global_model_id: str) -> Optional[EvaluationRecord]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT * FROM evaluation_records WHERE global_model_id = ? ORDER BY completed_at DESC LIMIT 1',
+                               (global_model_id,)).fetchone()
+            return self._evaluation(row) if row else None
+
     def save_promotion_decision(self, pd: PromotionDecision):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
-                INSERT OR REPLACE INTO promotion_decisions 
+                INSERT OR REPLACE INTO promotion_decisions
+                (promotion_decision_id, candidate_global_model_id, previous_main_global_model_id, decision,
+                 promotion_policy_version, evaluation_record_id, reason, metric_summary, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 pd.promotion_decision_id, pd.candidate_global_model_id, pd.previous_main_global_model_id,

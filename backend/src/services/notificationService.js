@@ -7,9 +7,11 @@ const Notification = require('../models/Notification');
  * to the hospital's Socket.io room. Returns the hospital ids that were notified.
  * Failures are logged, never thrown: a notification must not undo a federation action.
  */
-const notifyHospitals = async ({ exclude = [], type, title, content, job_id = null, round_id = null }) => {
+const notifyHospitals = async ({ exclude = [], only = null, type, title, content, job_id = null, round_id = null }) => {
   try {
-    const hospitals = await Hospital.find({ status: 'active', hospital_id: { $nin: exclude } }, 'hospital_id');
+    // `only` limits the notification to the listed hospitals (e.g. the one whose join request was decided).
+    const filter = only ? { $in: only.filter((id) => !exclude.includes(id)) } : { $nin: exclude };
+    const hospitals = await Hospital.find({ status: 'active', hospital_id: filter }, 'hospital_id');
     if (!hospitals.length) return [];
     const docs = await Notification.insertMany(hospitals.map(({ hospital_id }) => ({
       notification_id: `NTF_${crypto.randomBytes(8).toString('hex')}`,

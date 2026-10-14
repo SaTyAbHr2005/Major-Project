@@ -60,9 +60,19 @@ exports.getArchitectures = async (req, res) => {
 exports.listJobs = async (req, res) => {
   try {
     const result = await callPythonAdapter({ action: 'list_jobs' });
+    // A hospital sees only its own join request, never other hospitals' eligibility summaries.
+    if (req.user.role === 'hospital_operator') {
+      (result.jobs || []).forEach((j) => {
+        j.my_participation = (j.participants || []).find((p) => p.hospital_identifier === req.user.hospital_id) || null;
+        delete j.participants;
+      });
+    }
     // Admins see which hospital each participant id is; hospitals only get the ids.
     if (req.user.role === 'admin') {
-      const ids = [...new Set((result.jobs || []).flatMap((j) => (j.rounds || []).flatMap((r) => r.expected_participants || [])))];
+      const ids = [...new Set((result.jobs || []).flatMap((j) => [
+        ...(j.rounds || []).flatMap((r) => r.expected_participants || []),
+        ...(j.participants || []).map((p) => p.hospital_identifier),
+      ]))];
       const hospitals = ids.length ? await Hospital.find({ hospital_id: { $in: ids } }, 'hospital_id name') : [];
       result.hospital_names = Object.fromEntries(hospitals.map((h) => [h.hospital_id, h.name]));
     }
@@ -139,6 +149,49 @@ exports.deleteRound = async (req, res) => {
   }
 };
 
+// Hospital asks to join a job, sending the summary of its local eligibility check (numbers only).
+exports.requestParticipation = async (req, res) => {
+  try {
+    const result = await callPythonAdapter({
+      action: 'request_participation',
+      job_id: req.params.job_id,
+      participant_id: req.user.hospital_id, // the authenticated hospital, never a body field
+      eligibility: req.body.eligibility,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+};
+
+// Admin approves or rejects a hospital's join request; the hospital is notified.
+exports.decideParticipation = async (req, res) => {
+  try {
+    const decision = String(req.body.decision || '').toUpperCase();
+    const result = await callPythonAdapter({
+      action: 'decide_participation',
+      job_id: req.params.job_id,
+      participant_id: req.params.hospital_id,
+      decision,
+      reason: req.body.reason || '',
+      admin_id: req.user.user_id,
+    });
+    const approved = decision === 'APPROVED';
+    result.notified_hospitals = await notifyHospitals({
+      only: [req.params.hospital_id],
+      type: approved ? 'PARTICIPATION_APPROVED' : 'PARTICIPATION_REJECTED',
+      title: `Request to join ${req.params.job_id} ${approved ? 'approved' : 'not approved'}`,
+      content: approved
+        ? `Your hospital can now take part in federation job ${req.params.job_id}. Join an open round under Federation Status.`
+        : `Your request to join federation job ${req.params.job_id} was not approved.${req.body.reason ? ` Reason: ${req.body.reason}` : ''}`,
+      job_id: req.params.job_id,
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+};
+
 exports.registerParticipant = async (req, res) => {
   try {
     const result = await callPythonAdapter({ 
@@ -149,7 +202,8 @@ exports.registerParticipant = async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    // Not approved for the job (federation/participation.py) is a permission refusal, not a server error.
+    res.status(/cannot join/.test(err.message) ? 403 : 500).json({ success: false, error: err.message });
   }
 };
 

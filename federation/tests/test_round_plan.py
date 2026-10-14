@@ -103,6 +103,15 @@ def future(hours=1):
     return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=hours)).isoformat()
 
 
+ELIGIBLE = {"eligible": True, "task_match": True, "train_sample_count": 50}
+
+
+def approve(cwd, hospital):
+    """Hospitals join a job by request + admin approval (federation/participation.py)."""
+    assert adapter(cwd, action="request_participation", job_id="JOB1", participant_id=hospital, eligibility=ELIGIBLE)["success"]
+    assert adapter(cwd, action="decide_participation", job_id="JOB1", participant_id=hospital, decision="APPROVED")["success"]
+
+
 def submit(cwd, round_id, hospital, mu):
     """A hospital update built from the round's base model, reporting the given proximal_mu."""
     storage = FederationStorage(db_path=str(cwd / "federation_metadata.db"), artifacts_dir=str(cwd / "federation_artifacts"))
@@ -112,6 +121,7 @@ def submit(cwd, round_id, hospital, mu):
     build_federation_handoff(get_parameters(model), f"LOCAL_{hospital}", 1, ARCH, rnd.base_model_id, rnd.base_model_version,
                              rnd.base_model_checksum, 50, MAPPING, {}, {}, {"proximal_mu": mu}, "cpu", "fp32",
                              "TRAINING_COMPLETED_AWAITING_FEDERATION").save(d)
+    approve(cwd, hospital)
     assert adapter(cwd, action="register_participant", job_id="JOB1", round_id=round_id, participant_id=hospital)["success"]
     res = adapter(cwd, action="submit_update", job_id="JOB1", round_id=round_id, participant_id=hospital, handoff_dir=d)
     assert res["success"], res

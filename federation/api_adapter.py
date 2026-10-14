@@ -11,6 +11,7 @@ from federation.rounds import RoundManager
 from federation.events import EventEmitter
 from federation.models import now_iso, JobStatus, RoundStatus
 from federation.round_plan import plan_status
+from federation import participation
 
 # The backend starts this adapter once per request. Intake, aggregation, evaluation and promotion
 # pull in PyTorch/torchvision (about 7 s to import), so they are imported only by the actions that
@@ -163,6 +164,12 @@ def job_plan(storage, job):
     return plan_status(agg, rounds, scores)
 
 
+def job_participants(storage, job_id):
+    """Join requests of a job (dicts), including hospitals approved before requests existed."""
+    job = storage.get_job(job_id)
+    return [dataclasses.asdict(p) for p in participation.list_participants(storage, job)] if job else []
+
+
 def find_job(storage, job_id):
     return next((j for j in get_all_jobs(storage) if j["federation_job_id"] == job_id), None)
 
@@ -282,6 +289,7 @@ def main():
             for j in jobs:
                 j['rounds'] = get_job_rounds(storage, j['federation_job_id'])
                 j['plan'] = job_plan(storage, j)
+                j['participants'] = job_participants(storage, j['federation_job_id'])
             print(json.dumps({"success": True, "jobs": jobs}, cls=EnhancedJSONEncoder))
             
         elif action == "get_job_details":
@@ -293,6 +301,7 @@ def main():
                 return
             job['rounds'] = get_job_rounds(storage, job_id)
             job['plan'] = job_plan(storage, job)
+            job['participants'] = job_participants(storage, job_id)
             for r in job['rounds']:
                 r['updates'] = get_round_updates(storage, r['round_id'])
             print(json.dumps({"success": True, "job": job}, cls=EnhancedJSONEncoder))
@@ -384,26 +393,55 @@ def main():
             updates = get_hospital_updates(storage, hosp_id)
             print(json.dumps({"success": True, "updates": updates}, cls=EnhancedJSONEncoder))
 
+        elif action == "request_participation":
+            # Hospital asks to join a job, with the summary of its local eligibility check.
+            job = storage.get_job(req["job_id"])
+            if not job:
+                raise ValueError(f"Job {req['job_id']} does not exist.")
+            p = participation.request_participation(storage, job, req["participant_id"], req.get("eligibility"))
+            print(json.dumps({"success": True, "participant": p}, cls=EnhancedJSONEncoder))
+
+        elif action == "decide_participation":
+            # Admin approves or rejects a hospital's request.
+            job = storage.get_job(req["job_id"])
+            if not job:
+                raise ValueError(f"Job {req['job_id']} does not exist.")
+            p = participation.decide_participation(storage, job, req["participant_id"], req.get("decision"),
+                                                   req.get("reason", ""), req.get("admin_id", ""))
+            events.emit("audit", action=f"federation_participant_{p.authorization_status.lower()}",
+                        job_id=job.federation_job_id, hospital_id=p.hospital_identifier,
+                        admin=req.get("admin_id", ""), timestamp=now_iso())
+            print(json.dumps({"success": True, "participant": p}, cls=EnhancedJSONEncoder))
+
         elif action == "register_participant":
-            # Add participant to expected_participants for job and round
+            # Joining a round: only hospitals the admin approved for the job (participation.py).
             job_id = req["job_id"]
             round_id = req["round_id"]
             participant_id = req["participant_id"]
-            
+
             job = storage.get_job(job_id)
             if not job:
                 print(json.dumps({"success": False, "error": "Job not found"}))
                 return
+            if not participation.can_join(storage, job, participant_id):
+                p = participation.get_participant(storage, job, participant_id)
+                state = {None: "has not requested to join", "PENDING": "is waiting for admin approval",
+                         "REJECTED": "was not approved"}.get(p.authorization_status if p else None, "is not approved")
+                print(json.dumps({"success": False, "error": f"Hospital {participant_id} {state} for job {job_id}; "
+                                                           "it cannot join this job's rounds."}))
+                return
             if participant_id not in job.expected_participants:
                 job.expected_participants.append(participant_id)
                 storage.save_job(job)
-            
+
             if round_id:
                 rnd = storage.get_round(round_id)
-                if rnd:
-                    if participant_id not in rnd.expected_participants:
-                        rnd.expected_participants.append(participant_id)
-                        storage.save_round(rnd)
+                if not rnd or rnd.federation_job_id != job_id:
+                    print(json.dumps({"success": False, "error": "Round not found in this job"}))
+                    return
+                if participant_id not in rnd.expected_participants:
+                    rnd.expected_participants.append(participant_id)
+                    storage.save_round(rnd)
             print(json.dumps({"success": True}))
 
         elif action == "submit_update":

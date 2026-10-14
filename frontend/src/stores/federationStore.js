@@ -57,6 +57,11 @@ export const useFederationStore = create((set, get) => ({
   },
   deleteJob: async (jobId) => { await federation.deleteJob(jobId); await get().loadJobs(); },
   deleteRound: async (roundId) => { await federation.deleteRound(roundId); await get().loadJobs(); },
+  requestParticipation: async (jobId, eligibility) => { await federation.requestParticipation(jobId, eligibility); await get().loadJobs(); },
+  decideParticipation: async (jobId, hospitalId, decision, reason) => {
+    await federation.decideParticipation(jobId, hospitalId, decision, reason);
+    await get().loadJobs();
+  },
   evaluateModel: async (id) => { await federation.evaluateModel(id); await get().loadGlobalModels(); },
   promoteModel: async (id, evalId) => { await federation.promoteModel(id, evalId); await get().loadGlobalModels(); },
 

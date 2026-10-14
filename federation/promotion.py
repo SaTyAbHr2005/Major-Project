@@ -31,45 +31,16 @@ class PromotionManager:
         if not candidate_model:
             raise ValueError(f"Candidate model {candidate_global_model_id} not found.")
             
-        # Fetch the evaluation record directly
-        # For simplicity, we just use the evaluation id passed
-        import sqlite3
-        candidate_eval = None
-        with sqlite3.connect(self.storage.db_path) as conn:
-            cursor = conn.execute('SELECT * FROM evaluation_records WHERE evaluation_id = ?', (evaluation_record_id,))
-            row = cursor.fetchone()
-            if row:
-                from .models import EvaluationRecord
-                import json
-                candidate_eval = EvaluationRecord(
-                    evaluation_id=row[0], global_model_id=row[1], model_version=row[2], task=row[3], architecture=row[4],
-                    evaluation_dataset_id=row[5], evaluation_dataset_version=row[6], sample_count=row[7],
-                    accuracy=row[8], precision=row[9], recall=row[10], f1=row[11], per_class_metrics=json.loads(row[12]),
-                    confusion_matrix=json.loads(row[13]), predictions_location=row[14], metrics_location=row[15],
-                    inference_configuration=json.loads(row[16]), status=row[17], started_at=row[18], completed_at=row[19]
-                )
-                
+        candidate_eval = self.storage.get_evaluation_record(evaluation_record_id)
         if not candidate_eval:
             raise ValueError(f"Evaluation record {evaluation_record_id} not found.")
-            
-        # Get current main model
+        if candidate_eval.global_model_id != candidate_model.global_model_id:
+            raise ValueError(f"Evaluation record {evaluation_record_id} belongs to {candidate_eval.global_model_id}, "
+                             f"not {candidate_model.global_model_id}.")
+
+        # Get current main model and its latest evaluation
         current_main = self.storage.get_main_global_model(candidate_model.task, candidate_model.architecture, candidate_model.schema_hash)
-        
-        main_eval = None
-        if current_main:
-            with sqlite3.connect(self.storage.db_path) as conn:
-                cursor = conn.execute('SELECT * FROM evaluation_records WHERE global_model_id = ? ORDER BY completed_at DESC LIMIT 1', (current_main.global_model_id,))
-                row = cursor.fetchone()
-                if row:
-                    from .models import EvaluationRecord
-                    import json
-                    main_eval = EvaluationRecord(
-                        evaluation_id=row[0], global_model_id=row[1], model_version=row[2], task=row[3], architecture=row[4],
-                        evaluation_dataset_id=row[5], evaluation_dataset_version=row[6], sample_count=row[7],
-                        accuracy=row[8], precision=row[9], recall=row[10], f1=row[11], per_class_metrics=json.loads(row[12]),
-                        confusion_matrix=json.loads(row[13]), predictions_location=row[14], metrics_location=row[15],
-                        inference_configuration=json.loads(row[16]), status=row[17], started_at=row[18], completed_at=row[19]
-                    )
+        main_eval = self.storage.get_latest_evaluation(current_main.global_model_id) if current_main else None
 
         should_promote = self.policy.evaluate(candidate_eval, main_eval)
         

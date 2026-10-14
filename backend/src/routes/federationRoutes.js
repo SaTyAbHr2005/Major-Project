@@ -14,7 +14,9 @@ const {
   deleteRound,
   downloadBaseModel,
   registerParticipant,
-  submitUpdate
+  submitUpdate,
+  requestParticipation,
+  decideParticipation
 } = require('../controllers/federationController');
 
 const { requireAuth } = require('../authentication/middleware/authMiddleware');
@@ -40,9 +42,11 @@ router.post('/rounds/aggregate', requireRole(ROLES.ADMIN), aggregateRound);
 router.get('/models', requireRole(ROLES.ADMIN), listGlobalModels);
 router.post('/models/evaluate', requireRole(ROLES.ADMIN), evaluateModel);
 router.post('/models/promote', requireRole(ROLES.ADMIN), promoteModel);
+router.post('/jobs/:job_id/participants/:hospital_id/decision', requireRole(ROLES.ADMIN), decideParticipation);
 
 // Hospital Operator endpoints
 router.get('/hospital-status', requireRole(ROLES.HOSPITAL_OPERATOR), getHospitalStatus);
+router.post('/jobs/:job_id/participation-request', requireRole(ROLES.HOSPITAL_OPERATOR), requestParticipation);
 router.post('/jobs/:job_id/rounds/:round_id/participate', requireRole(ROLES.HOSPITAL_OPERATOR), registerParticipant);
 router.post('/jobs/:job_id/rounds/:round_id/submit', requireRole(ROLES.HOSPITAL_OPERATOR), submitUpdate);
 

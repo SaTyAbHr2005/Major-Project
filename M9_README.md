@@ -1,7 +1,7 @@
 # Module 9 — Federated Learning and Global Model Management
 
 ## 1. Purpose and Scope
-Module 9 (M9) is the project's **central** federated learning server/orchestrator. It is not peer-to-peer, and it does not use Flower: it is a custom protocol in `federation/`. It connects the hospital machines (through the local ML service) with the Consortium Admin (Node.js/React + Python API adapter). M9 manages federation jobs, round lifecycles, checksum-verified updates, weighted aggregation, and versioned Global Models.
+Module 9 (M9) is the project's **central** federated learning server/orchestrator. It is not peer-to-peer. The application runs on a custom protocol in `federation/`; Flower is used for the simulation bench (`federation/flower_sim.py`, section 24.3). It connects the hospital machines (through the local ML service) with the Consortium Admin (Node.js/React + Python API adapter). M9 manages federation jobs, round lifecycles, checksum-verified updates, weighted aggregation, and versioned Global Models.
 
 > Updated 2026-10-09. Changes since the original write-up:
 > - rounds are opened from the admin UI;
@@ -11,6 +11,10 @@ Module 9 (M9) is the project's **central** federated learning server/orchestrato
 > - hospitals are notified when a round opens or closes.
 >
 > See sections 3, 5, 7, 14 and 22. Plain-language overview: `docs/README.md` section 6.
+>
+> Updated 2026-10-14: round plan (total rounds, early stopping, automatic next round), FedProx local term,
+> Flower simulation bench (section 24); join requests with admin approval (section 6); evaluation stops
+> when an evaluation image cannot be processed (section 15).
 
 ## 2. Architectural Overview
 The architecture separates administrative orchestration from local training:
@@ -18,20 +22,21 @@ The architecture separates administrative orchestration from local training:
 - **Hospital Client (Local)**: Verifies eligibility, obtains the prescribed canonical base model from its local model store, verifies its checksum, performs local training on private data, and submits a `FederationHandoff` payload.
 
 ## 3. Project-Specific Centralized Federation Aggregation Protocol
-This project utilizes a **Project-Specific Centralized Federation Aggregation Protocol**. It does *not* implement a conventional, fully automated iterative FedAvg where the newly aggregated global model is automatically broadcasted back to all participating hospitals after each round.
+This project utilizes a **Project-Specific Centralized Federation Aggregation Protocol**. The server does not push models to hospitals: a hospital fetches the round's base model when it joins, and it trains when its operator starts training. With a round plan (section 24.1) the server side repeats on its own: after each aggregation the next round opens from the new global model until the planned total or the stopping rule is reached. Without a plan, the admin opens every round.
 
 **The Workflow:**
-1. **Admin** creates a federation job.
-2. **Admin** opens a round (deadline + minimum participants). M9 prepares the round's **canonical base model**:
+1. **Admin** creates a federation job (optionally with a round plan).
+2. **Hospitals** run the eligibility check locally and **request to join**; the **admin approves or rejects** each request (section 6).
+3. **Admin** opens a round (deadline + minimum participants), or the round plan opens it. M9 prepares the round's **canonical base model**:
    - round 1: one freshly initialised seed;
    - later rounds: the job's latest global model.
-3. **Eligible hospitals** join the round. Each one downloads the base model from the server.
-4. **Hospitals** train locally (M7) and produce checkpoint artifacts.
-5. **M9 (Central)** receives and strictly validates these updates.
-6. **M9** aggregates the validated parameter arrays.
-7. A single **Global Model** is created centrally.
-8. **Admin** evaluates the model.
-9. **Admin** makes a promotion decision.
+4. **Approved hospitals** join the round. Each one downloads the base model from the server.
+5. **Hospitals** train locally (M7) and produce checkpoint artifacts.
+6. **M9 (Central)** receives and strictly validates these updates.
+7. **M9** aggregates the validated parameter arrays.
+8. A single **Global Model** is created centrally.
+9. **Admin** evaluates the model.
+10. **Admin** makes a promotion decision.
 
 **Key Boundary:** The Global Model is centrally controlled. Hospitals receive a global model's weights only as the **base model of a later round they join** (authenticated download). There is no general push to all hospitals. Researchers have no access to global model weights.
 
@@ -63,6 +68,23 @@ Hospital identity relies on authenticated JWT/session context, not on untrusted 
 - The Node.js API obtains `req.user.hospital_id` directly from the authenticated session.
 - Node.js explicitly passes this verified identity to the Python M9 backend.
 - M9 records and validates participant authorization against its own `expected_participants` mechanism defined in the Federation Job.
+
+**Join requests (added 2026-10-14, `federation/participation.py`).** The server never sees a hospital's data, so it
+cannot judge eligibility itself:
+1. The hospital app runs the eligibility check on its own machine (`hospital_client/federation/eligibility.py`:
+   task match, class coverage, image counts, hardware tier).
+2. The hospital sends **Request to join** (`POST /api/v1/federation/jobs/:job_id/participation-request`) with only
+   that summary. The server keeps only aggregate fields (booleans, counts, class names, short reasons; bounded
+   sizes); anything else, such as paths, is dropped. An ineligible summary is refused.
+3. The admin sees each request with the summary on the job card and approves or rejects it
+   (`POST /api/v1/federation/jobs/:job_id/participants/:hospital_id/decision`). The hospital is notified.
+4. Only **approved** hospitals can join the job's rounds (`/participate` returns 403 otherwise). Approval adds the
+   hospital to the job's `expected_participants`, which update validation checks; rejection removes it, and drops it
+   from rounds it joined but has not sent an update to.
+- Hospitals that were in `expected_participants` before join requests existed count as approved.
+- A hospital sees only its own request (`my_participation` in the job list), never other hospitals' summaries.
+- The summary is reported by the hospital and **cannot be verified** by the server. It is decision support for the
+  admin, like the sample count the update reports today; detecting dishonest hospitals belongs to Module 12.
 - **Note**: The legacy M1-M3 MongoDB `TrainingRequest` records are out of scope for M9 and are not used for final M9 federation authorization.
 
 ## 7. Canonical Base-Model Provenance
@@ -174,6 +196,10 @@ M16 LocalInferenceEngine
 ```
 This isolates the permanent M9 federation format from the evaluation mechanics of M16.
 
+If any evaluation image cannot be processed, the evaluation **stops with an error** listing how many images failed
+and the first few file names, and no metrics are recorded. (Before 2026-10-14 failed images were skipped silently,
+so metrics could describe only part of the evaluation set.)
+
 ## 16. Global Model Lifecycle
 Upon successful creation, an aggregated Global Model assumes the status:
 `EVALUATION_PENDING`
@@ -217,7 +243,8 @@ M9 strictly implements and verified the following:
 - Strict architecture/schema/task topological validation.
 - SHA-256 parameter integrity verification and duplicate filtering.
 - Safely handling/rejecting NaN/Inf in model tensors.
-- SQLite named-column persistence hardening.
+- SQLite named-column persistence hardening (participants, evaluation records and promotion decisions included since 2026-10-14).
+- Join requests with admin approval; only approved hospitals can join rounds (section 6).
 - Dynamic historical provenance calculation.
 
 ## 20. Known Scope / Future Modules
@@ -265,6 +292,11 @@ The backend (`backend/src/services/notificationService.js`) stores one notificat
 
 ## 23. Final M9 Status
 **PASS** — The currently implemented Module 9 federation architecture has been verified against its defined architectural requirements, including hospital participation and authorization, canonical base-model provenance, update validation, weighted aggregation, Global Model creation, persistence, dynamic participant provenance, and Admin-side Global Model retrieval/evaluation integration.
+
+Against the implementation plan (2026-10-14): Flower server/client workflow and multi-client simulation
+(`federation/flower_sim.py`), FedAvg, global-model exchange, sample-weighted aggregation, repeated rounds with a
+planned total or stopping rule, and FedProx are implemented and tested. Still open: running the simulation bench on
+real data and the FedAvg vs FedProx experiments (Module 20).
 
 M9 is the completed federation lifecycle and aggregation foundation for the current project scope. Privacy-enhancing mechanisms, enhanced secure-transport protections, Byzantine/malicious-update detection, and advanced telemetry remain outside the current M9 implementation and are reserved for subsequent modules.
 
@@ -332,5 +364,5 @@ The application protocol (sections 3-22) is unchanged in its trust model: hospit
 through the backend, and the cross-machine submission limitation in section 20 still applies.
 Flower is used for the simulation bench and experiments, not for the hospital desktop flow.
 
-Tests: `federation/tests/test_round_plan.py` (23), `federation/tests/test_flower_sim.py` (11, including a failing-client run and a
+Tests: `federation/tests/test_round_plan.py` (23), `federation/tests/test_participation.py` (17), `federation/tests/test_flower_sim.py` (11, including a failing-client run and a
 real 2-client FedProx Flower run), `hospital_client/training/tests/test_fedprox.py` (8).
