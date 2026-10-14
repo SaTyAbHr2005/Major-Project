@@ -18,11 +18,72 @@ const planSummary = (job) => {
   return parts.join(' · ');
 };
 
+const STATUS_COLOR = { PENDING: '#eab308', APPROVED: 'var(--status-healthy)', REJECTED: '#ef4444' };
+
+/** The hospital's own eligibility summary in one line (reported by the hospital; the server cannot verify it). */
+const eligibilityLine = (e = {}) => {
+  if (!Object.keys(e).length) return 'No summary: this hospital joined before join requests existed.';
+  const parts = [];
+  if (e.task_match === false) parts.push('task does not match');
+  if (e.required_classes) {
+    const have = e.required_classes.filter((c) => (e.available_classes || []).includes(c)).length;
+    parts.push(`classes ${have} of ${e.required_classes.length}${e.missing_classes?.length ? ` (missing ${e.missing_classes.join(', ')})` : ''}`);
+  }
+  if (e.train_sample_count != null) {
+    parts.push(`${e.train_sample_count.toLocaleString()} training / ${(e.validation_sample_count ?? 0).toLocaleString()} validation / `
+      + `${(e.test_sample_count ?? 0).toLocaleString()} test images`);
+  }
+  if (e.architecture_tier && e.architecture_tier !== 'NOT_EVALUATED') parts.push(`hardware: ${e.architecture_tier.toLowerCase().replace(/_/g, ' ')}`);
+  return parts.join(' · ') || (e.eligible ? 'eligible' : 'not eligible');
+};
+
+/** Hospitals that asked to join a job, with their eligibility summary and the admin's decision buttons. */
+const ParticipantRequests = ({ job, hospitalNames, onDecide }) => {
+  const list = job.participants || [];
+  const pending = list.filter((p) => p.authorization_status === 'PENDING').length;
+  return (
+    <div style={{ marginBottom: '16px', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
+      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px' }}>
+        Hospital requests{pending ? ` · ${pending} waiting for your decision` : ''}
+      </div>
+      {list.length === 0 && (
+        <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          No hospital has asked to join yet. Hospitals check eligibility on their own machine and request from Federation Status.
+        </div>
+      )}
+      {list.map((p) => (
+        <div key={p.hospital_identifier} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', padding: '6px 0', borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: '11px', minWidth: 0 }}>
+            <span style={{ color: '#fff', fontWeight: 600 }}>{hospitalNames[p.hospital_identifier] || p.hospital_identifier}</span>
+            <span style={{ color: 'var(--text-muted)' }}> ({p.hospital_identifier})</span>
+            <span style={{ marginLeft: '8px', color: STATUS_COLOR[p.authorization_status], fontWeight: 600 }}>{p.authorization_status}</span>
+            <div style={{ color: 'var(--text-secondary)', marginTop: '2px' }}>{eligibilityLine(p.eligibility)}</div>
+            {p.decision_reason && p.expected_status !== 'LEGACY' && <div style={{ color: 'var(--text-muted)' }}>Note: {p.decision_reason}</div>}
+          </div>
+          <div style={{ display: 'flex', gap: '6px', flexShrink: 0 }}>
+            {p.authorization_status !== 'APPROVED' && (
+              <button className="btn btn-primary" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={() => onDecide(job, p, 'APPROVED')}>Approve</button>
+            )}
+            {p.authorization_status !== 'REJECTED' && (
+              <button className="btn btn-danger" style={{ fontSize: '11px', padding: '3px 10px' }} onClick={() => onDecide(job, p, 'REJECTED')}>
+                {p.authorization_status === 'APPROVED' ? 'Remove' : 'Reject'}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '6px' }}>
+        The summary is reported by the hospital's own eligibility check; the server never sees its images and cannot verify it.
+      </div>
+    </div>
+  );
+};
+
 export const FederatedTrainingView = () => {
 
   const {
     jobs: jobsResource, architectures: archResource, loadJobs, loadArchitectures,
-    createJob, createRound, deleteJob, deleteRound, hospitalNames,
+    createJob, createRound, deleteJob, deleteRound, hospitalNames, decideParticipation,
   } = useFederationStore();
   const [aggregateDialog, startAggregate] = useAggregateRound();
   const jobs = jobsResource.data;
@@ -132,6 +193,27 @@ export const FederatedTrainingView = () => {
       setMessage({ tone: 'success', text: `Federation job ${newJob.job_id} created.` });
     } catch (err) {
       setMessage({ tone: 'error', text: `Error creating job: ${err.message}` });
+    }
+  };
+
+  // Approve / reject a hospital's join request (rejecting an approved hospital removes its access).
+  const handleDecision = async (job, p, decision) => {
+    const name = hospitalNames[p.hospital_identifier] || p.hospital_identifier;
+    if (decision === 'REJECTED') {
+      const ok = await confirm({
+        title: p.authorization_status === 'APPROVED' ? `Remove ${name} from ${job.federation_job_id}?` : `Reject ${name}'s request?`,
+        message: 'The hospital will not be able to join this job\'s rounds. Updates it already sent stay in their rounds. It can request again later.',
+        confirmLabel: p.authorization_status === 'APPROVED' ? 'Remove' : 'Reject',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setMessage(null);
+    try {
+      await decideParticipation(job.federation_job_id, p.hospital_identifier, decision);
+      setMessage({ tone: 'success', text: `${name} ${decision === 'APPROVED' ? 'approved' : 'is no longer allowed'} for ${job.federation_job_id}. The hospital was notified.` });
+    } catch (err) {
+      setMessage({ tone: 'error', text: err.message });
     }
   };
 
@@ -330,6 +412,8 @@ export const FederatedTrainingView = () => {
                   ))}
                 </div>
               </div>
+
+              <ParticipantRequests job={job} hospitalNames={hospitalNames} onDecide={handleDecision} />
 
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>

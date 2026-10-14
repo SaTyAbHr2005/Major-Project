@@ -15,6 +15,7 @@ const HospitalFederationView = () => {
   const runs = useMLStore((s) => s.runs.data);
   const {
     jobs, hospitalUpdates, taskVocabulary, loadJobs, loadHospitalUpdates, loadTaskVocabulary, participate,
+    requestParticipation,
   } = useFederationStore();
   const updates = hospitalUpdates.data;
   const availableJobs = jobs.data;
@@ -28,6 +29,8 @@ const HospitalFederationView = () => {
   const [settingTask, setSettingTask] = useState(false);
   const [retry, setRetry] = useState(null);       // { id: model being resubmitted, error }
   const [taskError, setTaskError] = useState(null);
+  const [requesting, setRequesting] = useState(null);   // job id whose join request is being sent
+  const [requestError, setRequestError] = useState(null); // { jobId, text }
 
   /* ── Helpers ────────────────────────────────────────────── */
 
@@ -98,6 +101,21 @@ const HospitalFederationView = () => {
       setTaskError(err.message);
     } finally {
       setSettingTask(false);
+    }
+  };
+
+  /* ── Request to join (admin approves) ─────────────────── */
+
+  // Sends only the summary of the local eligibility check (counts, classes, hardware tier), never images.
+  const handleRequestJoin = async (job) => {
+    setRequesting(job.federation_job_id);
+    setRequestError(null);
+    try {
+      await requestParticipation(job.federation_job_id, eligibilityResults[job.federation_job_id]);
+    } catch (err) {
+      setRequestError({ jobId: job.federation_job_id, text: err.message });
+    } finally {
+      setRequesting(null);
     }
   };
 
@@ -538,11 +556,41 @@ const HospitalFederationView = () => {
                     </div>
                   )}
                   
-                  {/* Participate button — only enabled for eligible jobs */}
-                  <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}
-                          disabled={!elig || !elig.eligible} onClick={() => handleParticipate(job)}>
-                    {elig && !elig.eligible ? 'Not Eligible' : 'Participate'}
-                  </button>
+                  {/* Join flow: request with the eligibility summary -> admin approves -> join open rounds */}
+                  {(() => {
+                    const mine = job.my_participation;
+                    const state = mine?.authorization_status;
+                    const openRound = job.rounds?.find(r => r.status === 'OPEN' || r.status === 'RECEIVING');
+                    const eligible = !!elig?.eligible;
+                    const note = (color, text) => (
+                      <div style={{ fontSize: '11px', color, marginBottom: '8px' }}>{text}</div>
+                    );
+                    const wide = { width: '100%', justifyContent: 'center' };
+                    return (
+                      <>
+                        {state === 'PENDING' && note('#3b82f6', 'Request sent. Waiting for the admin to approve your hospital for this job.')}
+                        {state === 'APPROVED' && note('#10b981', 'Approved for this job. You can join its open rounds.')}
+                        {state === 'REJECTED' && note('#ef4444', `Not approved${mine.decision_reason ? `: ${mine.decision_reason}` : '.'} You can request again.`)}
+                        {requestError?.jobId === job.federation_job_id && note('#ef4444', requestError.text)}
+                        {state === 'APPROVED' ? (
+                          <button className="btn btn-primary" style={wide} disabled={!eligible || !openRound} onClick={() => handleParticipate(job)}>
+                            {!eligible ? 'Not Eligible' : openRound ? `Participate in round ${openRound.round_number}` : 'Waiting for a round to open'}
+                          </button>
+                        ) : state === 'PENDING' ? (
+                          <button className="btn btn-secondary" style={wide} disabled>Waiting for approval</button>
+                        ) : (
+                          <button className="btn btn-primary" style={wide} disabled={!eligible || requesting === job.federation_job_id}
+                                  onClick={() => handleRequestJoin(job)}
+                                  title="Sends the admin only the summary above: eligibility, classes, image counts and hardware tier. No images.">
+                            {!selectedDatasetId ? 'Prepare a dataset to check eligibility'
+                              : !elig ? (evaluating ? 'Checking eligibility...' : 'Eligibility not checked yet')
+                              : !eligible ? 'Not Eligible'
+                              : requesting === job.federation_job_id ? 'Sending request...' : state === 'REJECTED' ? 'Request again' : 'Request to join'}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })}
