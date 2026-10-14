@@ -103,6 +103,7 @@ export function useAggregateRound(onDone) {
     if (step === 'done') {
       const gm = state.result.global_model || {};
       const notified = state.result.notified_hospitals || [];
+      const { plan, next_round: next, warnings = [] } = state.result;
       body = (
         <>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start', marginBottom: '14px' }}>
@@ -115,6 +116,17 @@ export function useAggregateRound(onDone) {
               <div>{notified.length} non-participating hospital{notified.length === 1 ? ' was' : 's were'} notified{notified.length ? `: ${notified.join(', ')}` : '.'}</div>
             </div>
           </div>
+          {plan?.finished && (
+            <Notice tone="success" style={{ marginBottom: '12px' }}>The job is complete. {plan.reason}</Notice>
+          )}
+          {next && (
+            <Notice tone="info" style={{ marginBottom: '12px' }}>
+              Round {next.round_number} opened automatically from this global model
+              {plan?.total_rounds ? ` (round ${next.round_number} of ${plan.total_rounds})` : ''}. It accepts updates until {fmtDate(next.deadline)};
+              {' '}{(state.result.notified_next_round || []).length} hospital(s) were notified.
+            </Notice>
+          )}
+          {warnings.map((w) => <Notice key={w} tone="error" style={{ marginBottom: '12px' }}>{w}</Notice>)}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
             <button className="btn btn-secondary" onClick={close}>Close</button>
             <button className="btn btn-primary" onClick={() => { setState(null); setActiveScreen('models'); }}>View global models</button>

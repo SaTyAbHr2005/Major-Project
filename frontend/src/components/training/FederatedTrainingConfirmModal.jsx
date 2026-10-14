@@ -24,6 +24,8 @@ const FederatedTrainingConfirmModal = ({ isOpen, onClose, onConfirm, job, round,
               ['Job', job.federation_job_id], ['Round', round?.round_id || 'no open round'],
               ['Task', job.task], ['Model', job.architecture],
               ['Classes', job.num_classes], ['Epochs', epochs ?? "Module 8's setting"],
+              ['Strategy', job.aggregation_configuration?.strategy === 'fedprox' ? `FedProx (μ ${job.training_requirements?.proximal_mu})` : 'FedAvg'],
+              ['Planned rounds', job.plan?.total_rounds && round ? `${round.round_number} of ${job.plan.total_rounds}` : (round?.round_number ?? '-')],
               ['Dataset', datasetName], ['Training samples', eligibility?.train_sample_count?.toLocaleString() ?? '-'],
             ].map(([k, v]) => (
               <div key={k}>

@@ -18,6 +18,8 @@ const resetDataStores = () => {
     .forEach((store) => store.getState().reset());
 };
 
+let bootstrapping = null;   // the one session-restore of this page load
+
 export const useAuthStore = create((set) => {
   const startSession = (user) => {
     resetDataStores();
@@ -30,8 +32,12 @@ export const useAuthStore = create((set) => {
     user: null,
     status: 'bootstrapping',  // bootstrapping | authenticated | unauthenticated
 
-    /** Restores the session from a stored token on page load. */
-    bootstrap: async () => {
+    /**
+     * Restores the session from a stored token on page load. Runs once per page: React StrictMode
+     * mounts App twice in development, and a second startSession() would reset the data stores
+     * after the screens had already requested their data, leaving them on "Loading..." for good.
+     */
+    bootstrap: () => (bootstrapping ??= (async () => {
       const user = authService.getToken() ? await authService.getMe() : null;
       if (!user) {
         authService.clearSession();
@@ -39,7 +45,7 @@ export const useAuthStore = create((set) => {
         return;
       }
       startSession(user);
-    },
+    })()),
 
     login: async (identifier, password, role = null, remember = true) => {
       const { user } = await authService.login(identifier, password, role, remember);

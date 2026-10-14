@@ -5,6 +5,19 @@ import { useConfirm } from '../components/common/ConfirmDialog';
 import { Notice } from '../components/common/Notice';
 import { useAggregateRound } from '../components/federation/AggregateRoundDialog';
 
+const FIELD_STYLE = { padding: '8px', background: 'var(--bg-nested)', color: '#fff', border: '1px solid var(--border-subtle)', borderRadius: '4px' };
+
+/** One line describing a job's round plan, e.g. "FedProx (μ 0.01) · 1 of 3 rounds done · next round opens automatically (24 h)". */
+const planSummary = (job) => {
+  const plan = job.plan || {};
+  const agg = job.aggregation_configuration || {};
+  const parts = [plan.strategy === 'fedprox' ? `FedProx (μ ${job.training_requirements?.proximal_mu})` : 'FedAvg'];
+  parts.push(plan.total_rounds ? `${plan.rounds_completed} of ${plan.total_rounds} rounds done` : `${plan.rounds_completed ?? 0} round(s) done, open-ended`);
+  if (plan.auto_continue) parts.push(`next round opens automatically (${agg.round_duration_hours} h)`);
+  if (plan.early_stopping) parts.push(`early stopping on ${plan.early_stopping.metric || 'accuracy'} (+${plan.early_stopping.min_delta ?? 0}, ${plan.early_stopping.patience} round(s))`);
+  return parts.join(' · ');
+};
+
 export const FederatedTrainingView = () => {
 
   const {
@@ -27,7 +40,15 @@ export const FederatedTrainingView = () => {
     architecture: 'ResNet50', // Will default to first if available
     num_classes: 2,
     class_mapping_list: ['', ''], // dynamic list of class names
-    minimum_participants: 2
+    minimum_participants: 2,
+    // Round plan (Module 9): planned rounds, automatic next round, early stopping. Jobs created here use
+    // FedAvg; FedProx is a research setting (API and the Flower simulation bench), not an admin choice.
+    total_rounds: '',            // empty = open-ended: the admin opens every round
+    round_duration_hours: 24,
+    early_stop: false,
+    es_metric: 'accuracy',
+    es_min_delta: 0.005,
+    es_patience: 2,
   });
 
   // Open-round form: one job at a time; the deadline input is local time.
@@ -57,6 +78,12 @@ export const FederatedTrainingView = () => {
   };
 
   const loadJobsAndArchs = () => Promise.all([loadJobs(), loadArchitectures()]);
+  // The list stays visible while it reloads, so the button itself shows that a refresh is running.
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await loadJobsAndArchs(); } finally { setRefreshing(false); }
+  };
 
   useEffect(() => {
     loadJobsAndArchs();
@@ -82,9 +109,24 @@ export const FederatedTrainingView = () => {
       }
       validClasses.forEach((name, idx) => { class_mapping[name] = idx; });
 
+      const aggregation_configuration = { strategy: 'fedavg' };
+      if (newJob.total_rounds) {
+        aggregation_configuration.total_rounds = Number(newJob.total_rounds);
+        aggregation_configuration.round_duration_hours = Number(newJob.round_duration_hours);
+      }
+      if (newJob.early_stop) {
+        aggregation_configuration.early_stopping = {
+          metric: newJob.es_metric, min_delta: Number(newJob.es_min_delta), patience: Number(newJob.es_patience),
+        };
+      }
       await createJob({
-        ...newJob,
-        class_mapping
+        job_id: newJob.job_id,
+        task: newJob.task,
+        architecture: newJob.architecture,
+        num_classes: newJob.num_classes,
+        minimum_participants: newJob.minimum_participants,
+        class_mapping,
+        aggregation_configuration,
       });
       setShowCreateForm(false);
       setMessage({ tone: 'success', text: `Federation job ${newJob.job_id} created.` });
@@ -134,7 +176,9 @@ export const FederatedTrainingView = () => {
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Manage federated learning jobs, participants, and aggregations</div>
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={loadJobsAndArchs}><RefreshCw size={14} /> Refresh</button>
+          <button className="btn btn-secondary" onClick={refresh} disabled={refreshing} aria-busy={refreshing}>
+            <RefreshCw size={14} className={refreshing ? 'spin' : undefined} /> {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
           <button className="btn btn-primary" onClick={() => setShowCreateForm(!showCreateForm)}>
             <Plus size={14} /> New Federation Job
           </button>
@@ -197,6 +241,51 @@ export const FederatedTrainingView = () => {
               ))}
             </div>
 
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
+              <label style={{ fontSize: '12px', color: '#fff', fontWeight: 'bold' }}>Training plan</label>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Total rounds (empty = open-ended)
+                  <input type="number" min="1" placeholder="e.g. 5" style={{ ...FIELD_STYLE, width: '150px' }} value={newJob.total_rounds} onChange={e => setNewJob({...newJob, total_rounds: e.target.value})} />
+                </label>
+                {newJob.total_rounds && (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Hours per automatic round
+                    <input type="number" step="any" min="0.1" required style={{ ...FIELD_STYLE, width: '150px' }} value={newJob.round_duration_hours} onChange={e => setNewJob({...newJob, round_duration_hours: e.target.value})} />
+                  </label>
+                )}
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={newJob.early_stop} onChange={e => setNewJob({...newJob, early_stop: e.target.checked})} />
+                Stop early when the evaluated global model stops improving
+              </label>
+              {newJob.early_stop && (
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Metric
+                    <select style={FIELD_STYLE} value={newJob.es_metric} onChange={e => setNewJob({...newJob, es_metric: e.target.value})}>
+                      <option value="accuracy">Accuracy</option>
+                      <option value="f1">F1</option>
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Minimum improvement
+                    <input type="number" step="any" min="0" required style={{ ...FIELD_STYLE, width: '130px' }} value={newJob.es_min_delta} onChange={e => setNewJob({...newJob, es_min_delta: e.target.value})} />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Rounds without improvement
+                    <input type="number" min="1" required style={{ ...FIELD_STYLE, width: '130px' }} value={newJob.es_patience} onChange={e => setNewJob({...newJob, es_patience: e.target.value})} />
+                  </label>
+                </div>
+              )}
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                Without a total, you open every round yourself. With a total, each aggregation opens the next round automatically
+                until the total is reached; hospitals get the number of hours you set (field shown once a total is entered) to send
+                their update. Early stopping evaluates each new global model on the server's evaluation dataset.
+                Updates are combined with FedAvg (average weighted by each hospital's number of training images).
+              </div>
+            </div>
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
               <button type="submit" className="btn btn-primary">Create Job</button>
             </div>
@@ -224,6 +313,13 @@ export const FederatedTrainingView = () => {
                 </div>
               </div>
               
+              <div style={{ marginBottom: '10px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Training plan: </span>{planSummary(job)}
+              </div>
+              {job.plan?.finished && (
+                <Notice tone="success" style={{ marginBottom: '12px' }}>Finished: {job.plan.reason}</Notice>
+              )}
+
               <div style={{ marginBottom: '16px', padding: '10px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>Canonical Class Mapping:</div>
                 <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -239,8 +335,10 @@ export const FederatedTrainingView = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <h4 style={{ fontSize: '13px', color: '#cbd5e1' }}>Rounds</h4>
                   <button className="btn btn-primary" style={{ fontSize: '11px', padding: '4px 10px' }}
-                    disabled={roundInProgress(job) || roundForm?.jobId === job.federation_job_id}
-                    title={roundInProgress(job) ? 'Finish or delete the current round first' : undefined}
+                    disabled={roundInProgress(job) || roundForm?.jobId === job.federation_job_id || job.plan?.finished || (job.plan?.total_rounds && job.plan?.next_round_number == null)}
+                    title={job.plan?.finished ? 'This job has finished its training plan'
+                      : roundInProgress(job) ? 'Finish or delete the current round first'
+                        : job.plan?.total_rounds && job.plan?.next_round_number == null ? 'Every planned round already exists' : undefined}
                     onClick={() => setRoundForm({ jobId: job.federation_job_id, deadline: toLocalInput(new Date(Date.now() + 24 * 3600 * 1000)), minimum_participants: job.minimum_participants })}>
                     <Plus size={12} /> Open round {nextRoundNumber(job)}
                   </button>
