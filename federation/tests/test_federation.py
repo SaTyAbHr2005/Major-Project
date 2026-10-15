@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import unittest
@@ -149,7 +150,13 @@ class TestSecureFederation(unittest.TestCase):
         eval_record = self.eval_mgr.evaluate(gm.global_model_id, dataset_version="v1")
         self.assertEqual(eval_record.status, "COMPLETED")
         self.assertTrue(0.0 <= eval_record.accuracy <= 1.0)
-        
+        # The admin screen polls this file while the evaluation runs.
+        with open(self.eval_mgr.progress_path(gm.global_model_id)) as f:
+            progress = json.load(f)
+        self.assertEqual(progress["status"], "completed")
+        self.assertEqual(progress["done"], eval_record.sample_count)
+        self.assertEqual(progress["total"], eval_record.sample_count)
+
         gm_updated = self.storage.get_global_model(gm.global_model_id)
         self.assertEqual(gm_updated.status.value, "EVALUATED")
 

@@ -25,7 +25,44 @@ class EvaluationManager:
         self.event_emitter = event_emitter
         self.eval_datasets_dir = eval_datasets_dir
 
+    def progress_path(self, global_model_id: str) -> str:
+        return os.path.join(self.storage.artifacts_dir, "evaluation_progress", f"{global_model_id}.json")
+
     def evaluate(self, global_model_id: str, dataset_version: str = "v1") -> EvaluationRecord:
+        """Evaluate a global model; progress is written to progress_path() so the admin UI can poll it."""
+        path = self.progress_path(global_model_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        started_at = now_iso()
+        state = {"global_model_id": global_model_id, "status": "preparing", "done": 0, "total": None}
+
+        def progress(**changes):
+            # Best effort: progress is for the screen only and must never stop the evaluation.
+            # On Windows the replace is refused while another process (the backend polling it,
+            # antivirus) has the file open, so retry briefly and otherwise skip this update.
+            state.update(changes, started_at=started_at, updated_at=now_iso())
+            tmp = f"{path}.tmp"
+            try:
+                with open(tmp, "w") as f:
+                    json.dump(state, f)
+                for attempt in range(10):
+                    try:
+                        os.replace(tmp, path)   # readers never see a half-written file
+                        return
+                    except PermissionError:
+                        time.sleep(0.05)
+            except OSError:
+                pass
+
+        progress()
+        try:
+            record = self._evaluate(global_model_id, dataset_version, progress)
+        except Exception as e:
+            progress(status="failed", error=str(e))
+            raise
+        progress(status="completed")
+        return record
+
+    def _evaluate(self, global_model_id: str, dataset_version: str, progress) -> EvaluationRecord:
         gm = self.storage.get_global_model(global_model_id)
         if not gm:
             raise ValueError(f"Global model {global_model_id} not found.")
@@ -89,25 +126,29 @@ class EvaluationManager:
         
         # Expected structure: evaluation_datasets/{task}/{version}/{class_name}/img.jpg
         image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff')
+        images = []   # listed first so progress can report "done of total"
         for root, dirs, files in os.walk(dataset_path):
             class_name = os.path.basename(root)
             if class_name == dataset_version or not files:
                 continue
-            
+
             if class_name not in class_names:
                 class_names.append(class_name)
-                
-            for file in files:
-                if file.lower().endswith(image_extensions):
-                    img_path = os.path.join(root, file)
-                    result = engine.predict(img_path)
-                    
-                    if result.status.value == "COMPLETED":
-                        pred = result.output.predicted_label
-                        y_pred.append(pred)
-                        y_true.append(class_name)
-                    else:
-                        failed.append((os.path.relpath(img_path, dataset_path), result.error_category or result.status.value))
+
+            images += [(class_name, os.path.join(root, f)) for f in files if f.lower().endswith(image_extensions)]
+
+        progress(status="running", done=0, total=len(images), images_started_at=now_iso())
+        for i, (class_name, img_path) in enumerate(images, 1):
+            result = engine.predict(img_path)
+
+            if result.status.value == "COMPLETED":
+                pred = result.output.predicted_label
+                y_pred.append(pred)
+                y_true.append(class_name)
+            else:
+                failed.append((os.path.relpath(img_path, dataset_path), result.error_category or result.status.value))
+            if i % 25 == 0 or i == len(images):
+                progress(status="running", done=i, total=len(images))
 
         engine.close()
 

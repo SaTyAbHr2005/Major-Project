@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs/promises');
 const Hospital = require('../authentication/models/Hospital');
 const { notifyHospitals } = require('../services/notificationService');
 
@@ -261,6 +262,22 @@ exports.evaluateModel = async (req, res) => {
     const result = await callPythonAdapter({ action: 'evaluate', ...req.body });
     res.json(result);
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// Progress of a running evaluation, written by federation/evaluation.py. Read straight from the
+// file (no Python start-up) so the admin screen can poll it every second or two.
+exports.getEvaluationProgress = async (req, res) => {
+  const id = req.params.global_model_id;
+  if (!/^[A-Za-z0-9_.-]+$/.test(id)) {
+    return res.status(400).json({ success: false, error: 'Invalid global model id.' });
+  }
+  const file = path.resolve(__dirname, '../../../federation_artifacts/evaluation_progress', `${id}.json`);
+  try {
+    res.json({ success: true, progress: JSON.parse(await fs.readFile(file, 'utf8')) });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.json({ success: true, progress: null });
     res.status(500).json({ success: false, error: err.message });
   }
 };

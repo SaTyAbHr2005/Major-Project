@@ -46,6 +46,8 @@ export const deleteRound = (roundId) => request('DELETE', `/rounds/${encodeURICo
 // ── Admin: Global Models, Evaluation, Promotion ─────────────
 export const getGlobalModels = () => request('GET', '/models');
 export const evaluateModel = (globalModelId) => request('POST', '/models/evaluate', { global_model_id: globalModelId });
+// Progress of a running evaluation ({status, done, total, started_at, updated_at} or null).
+export const getEvaluationProgress = (globalModelId) => request('GET', `/models/${encodeURIComponent(globalModelId)}/evaluation-progress`);
 export const promoteModel = (globalModelId, evalRecordId) => request('POST', '/models/promote', { global_model_id: globalModelId, eval_record_id: evalRecordId });
 
 // ── Hospital: Own federation status ─────────────────────────

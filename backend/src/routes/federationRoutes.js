@@ -7,6 +7,7 @@ const {
   aggregateRound,
   listGlobalModels,
   evaluateModel,
+  getEvaluationProgress,
   promoteModel,
   getHospitalStatus,
   getArchitectures,
@@ -41,6 +42,7 @@ router.delete('/rounds/:round_id', requireRole(ROLES.ADMIN), deleteRound);
 router.post('/rounds/aggregate', requireRole(ROLES.ADMIN), aggregateRound);
 router.get('/models', requireRole(ROLES.ADMIN), listGlobalModels);
 router.post('/models/evaluate', requireRole(ROLES.ADMIN), evaluateModel);
+router.get('/models/:global_model_id/evaluation-progress', requireRole(ROLES.ADMIN), getEvaluationProgress);
 router.post('/models/promote', requireRole(ROLES.ADMIN), promoteModel);
 router.post('/jobs/:job_id/participants/:hospital_id/decision', requireRole(ROLES.ADMIN), decideParticipation);
 

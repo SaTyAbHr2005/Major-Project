@@ -671,6 +671,46 @@ describe('POST /api/v1/federation/models/evaluate', () => {
   });
 });
 
+describe('GET /api/v1/federation/models/:global_model_id/evaluation-progress', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const dir = path.resolve(__dirname, '../../../federation_artifacts/evaluation_progress');
+  const file = path.join(dir, 'GM-TEST-PROGRESS.json');
+  afterAll(() => fs.rmSync(file, { force: true }));
+
+  test('Admin reads the progress file written by the evaluator', async () => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ status: 'running', done: 25, total: 100 }));
+    const res = await request(app)
+      .get('/api/v1/federation/models/GM-TEST-PROGRESS/evaluation-progress')
+      .set('Authorization', `Bearer ${ADMIN()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.progress).toEqual({ status: 'running', done: 25, total: 100 });
+  });
+
+  test('No evaluation started → progress is null', async () => {
+    const res = await request(app)
+      .get('/api/v1/federation/models/GM-NEVER-EVALUATED/evaluation-progress')
+      .set('Authorization', `Bearer ${ADMIN()}`);
+    expect(res.status).toBe(200);
+    expect(res.body.progress).toBeNull();
+  });
+
+  test('Ids that could leave the progress folder are refused (400)', async () => {
+    const res = await request(app)
+      .get(`/api/v1/federation/models/${encodeURIComponent('..\\..\\secret')}/evaluation-progress`)
+      .set('Authorization', `Bearer ${ADMIN()}`);
+    expect(res.status).toBe(400);
+  });
+
+  test('Hospital cannot read evaluation progress (403)', async () => {
+    const res = await request(app)
+      .get('/api/v1/federation/models/GM-TEST-PROGRESS/evaluation-progress')
+      .set('Authorization', `Bearer ${HOSP_ALPHA()}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 // ═════════════════════════════════════════════════════════════════════════════
 // SECTION 9 — POST /models/promote
 // ═════════════════════════════════════════════════════════════════════════════

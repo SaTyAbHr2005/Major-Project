@@ -183,3 +183,17 @@ def test_evaluation_stops_instead_of_scoring_only_the_images_that_worked(tmp_pat
     with pytest.raises(ValueError, match=r"1 of 3 evaluation images could not be processed.*broken\.png"):
         EvaluationManager(storage, EventEmitter(), str(tmp_path / "eval")).evaluate("GM-X-V1")
     assert storage.get_latest_evaluation("GM-X-V1") is None          # no partial metrics were recorded
+    with open(EvaluationManager(storage, EventEmitter()).progress_path("GM-X-V1")) as f:
+        progress = json.load(f)                                       # the admin screen shows the failure
+    assert progress["status"] == "failed" and "broken.png" in progress["error"] and progress["done"] == 3
+
+
+def test_progress_file_that_cannot_be_replaced_does_not_stop_the_evaluation(tmp_path, monkeypatch):
+    # Windows refuses os.replace while the backend is reading the progress file.
+    def locked(*a, **k):
+        raise PermissionError(5, "Access is denied")
+    monkeypatch.setattr("federation.evaluation.os.replace", locked)
+    monkeypatch.setattr("federation.evaluation.time.sleep", lambda s: None)
+    storage = FederationStorage(str(tmp_path / "fed.db"), str(tmp_path / "artifacts"))
+    with pytest.raises(ValueError, match="not found"):     # the real error, not the progress write
+        EvaluationManager(storage, EventEmitter(), str(tmp_path / "eval")).evaluate("GM-MISSING")
