@@ -1,9 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { useFederationStore } from '../stores/federationStore';
+import { getEvaluationProgress } from '../services/federationService';
 import {
   Cpu, Layers, ShieldCheck, RefreshCw, ChevronDown, ChevronRight,
   CheckCircle, XCircle, Award, ArrowUpCircle, Clock, AlertTriangle
 } from 'lucide-react';
+
+const formatDuration = (ms) => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+};
+
+/** Live progress of a running evaluation: stage, images checked, elapsed and estimated time left. */
+const EvaluationProgress = ({ progress }) => {
+  const { status, done = 0, total, clickedAt } = progress;
+  const elapsed = Date.now() - clickedAt;
+  const counting = status === 'running' && total > 0;
+  const pct = counting ? Math.round((done / total) * 100) : 0;
+  // Time per image so far, measured from when image checks began (model loading excluded).
+  const imageTime = progress.updated_at && done > 0 ? Date.parse(progress.updated_at) - Date.parse(progress.images_started_at) : 0;
+  const remaining = counting && done > 0 && done < total ? (imageTime / done) * (total - done) : null;
+  const stage = status === 'starting' ? 'Starting the evaluation…'
+    : status === 'preparing' ? 'Loading the global model…'
+    : done >= total ? 'Calculating metrics…'
+    : `Checking evaluation images: ${done.toLocaleString()} of ${total.toLocaleString()}`;
+
+  return (
+    <div role="status" aria-live="polite" style={{ marginBottom: '16px', padding: '14px', background: 'var(--bg-card)', borderRadius: '6px', border: '1px solid rgba(59,130,246,0.35)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', fontSize: '13px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-primary)' }}>
+          <RefreshCw size={14} color="#3b82f6" style={{ animation: 'spin 1.2s linear infinite' }} />
+          {stage}
+        </span>
+        {counting && <span style={{ color: '#3b82f6', fontWeight: 600 }}>{pct}%</span>}
+      </div>
+      <div style={{ height: '6px', borderRadius: '3px', background: 'rgba(148,163,184,0.15)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${counting ? pct : 4}%`, background: '#3b82f6', borderRadius: '3px', transition: 'width 0.6s ease' }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '11px', color: '#94a3b8' }}>
+        <span>Elapsed {formatDuration(elapsed)}</span>
+        <span>{remaining != null ? `About ${formatDuration(remaining)} left` : 'Estimating time left…'}</span>
+      </div>
+    </div>
+  );
+};
 
 export const AdminFederationModelsView = () => {
   const { globalModels, loadGlobalModels: loadModels, evaluateModel, promoteModel } = useFederationStore();
@@ -13,17 +53,32 @@ export const AdminFederationModelsView = () => {
   const [expandedModel, setExpandedModel] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
   const [actionError, setActionError] = useState(null);
+  const [evalProgress, setEvalProgress] = useState(null);
 
   useEffect(() => { loadModels(); }, []);
 
   const handleEvaluate = async (globalModelId) => {
     setActionLoading(globalModelId);
     setActionError(null);
+    const clickedAt = Date.now();
+    setEvalProgress({ globalModelId, clickedAt, status: 'starting' });
+    // The evaluation request stays open until it finishes; meanwhile poll the progress file.
+    const timer = setInterval(async () => {
+      try {
+        const { progress } = await getEvaluationProgress(globalModelId);
+        // Ignore the file left by an earlier evaluation of the same model.
+        if (progress && Date.parse(progress.started_at) >= clickedAt - 2000) {
+          setEvalProgress({ globalModelId, clickedAt, ...progress });
+        }
+      } catch { /* a missed poll is fine; the next one retries */ }
+    }, 1500);
     try {
       await evaluateModel(globalModelId);
     } catch (err) {
       setActionError(`Evaluation failed: ${err.message}`);
     } finally {
+      clearInterval(timer);
+      setEvalProgress(null);
       setActionLoading(null);
     }
   };
@@ -45,6 +100,8 @@ export const AdminFederationModelsView = () => {
       'MAIN': { bg: 'rgba(16,185,129,0.15)', color: '#10b981', border: 'rgba(16,185,129,0.4)' },
       'EVALUATED': { bg: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: 'rgba(59,130,246,0.4)' },
       'EVALUATION_PENDING': { bg: 'rgba(234,179,8,0.15)', color: '#eab308', border: 'rgba(234,179,8,0.4)' },
+      // Shown only on this screen while its evaluation request runs; the stored status is still EVALUATION_PENDING.
+      'EVALUATION_IN_PROGRESS': { bg: 'rgba(59,130,246,0.15)', color: '#60a5fa', border: 'rgba(59,130,246,0.5)' },
       'HISTORICAL': { bg: 'rgba(148,163,184,0.1)', color: '#94a3b8', border: 'rgba(148,163,184,0.3)' },
       'EVALUATED_NOT_PROMOTED': { bg: 'rgba(239,68,68,0.1)', color: '#ef4444', border: 'rgba(239,68,68,0.3)' },
       'CREATED': { bg: 'rgba(168,85,247,0.1)', color: '#a855f7', border: 'rgba(168,85,247,0.3)' },
@@ -60,6 +117,7 @@ export const AdminFederationModelsView = () => {
         {status === 'MAIN' && <CheckCircle size={10} />}
         {status === 'EVALUATED_NOT_PROMOTED' && <XCircle size={10} />}
         {status === 'EVALUATION_PENDING' && <Clock size={10} />}
+        {status === 'EVALUATION_IN_PROGRESS' && <RefreshCw size={10} style={{ animation: 'spin 1.2s linear infinite' }} />}
         {status}
       </span>
     );
@@ -164,7 +222,7 @@ export const AdminFederationModelsView = () => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           {isExpanded ? <ChevronDown size={14} color="#94a3b8" /> : <ChevronRight size={14} color="#94a3b8" />}
                           <span style={{ fontWeight: 600, color: '#f8fafc', fontSize: '13px' }}>Version v{model.version}</span>
-                          {statusBadge(model.status)}
+                          {statusBadge(evalProgress?.globalModelId === model.global_model_id ? 'EVALUATION_IN_PROGRESS' : model.status)}
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', fontSize: '11px', color: '#94a3b8' }}>
                           <span>Round: {model.round_id || 'N/A'}</span>
@@ -291,6 +349,8 @@ export const AdminFederationModelsView = () => {
                                 </div>
                               )}
                             </div>
+                          ) : evalProgress?.globalModelId === model.global_model_id ? (
+                            <EvaluationProgress progress={evalProgress} />
                           ) : (
                             <div style={{ marginBottom: '16px', padding: '12px', background: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border-subtle)', fontSize: '12px', color: '#94a3b8' }}>
                               Not evaluated
