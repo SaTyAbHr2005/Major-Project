@@ -19,7 +19,7 @@ is a heuristic, a default, mock data or not implemented, it says so.
 | How a dataset becomes a trained model | this file, section 5, then the module docs it links |
 | How the model and settings change with the machine | section 5.5 (Module 8) |
 | How one training script trains every model | section 5.4 (Modules 6 + 7) |
-| How federated rounds work | section 6, then `../M9_README.md` |
+| How federated rounds work | section 6, then `module9_readme.md` |
 | How to install and run | `../README.md`, or section 9 here for the short version |
 | Login, roles, accounts | `module1_readme.md` |
 | Researcher/admin screens | `module2_readme.md` |
@@ -37,7 +37,7 @@ Per-module documents (each starts with an "At a glance" summary, then the full d
 | 6 Model management | [module6_readme.md](module6_readme.md) |
 | 7 Local training | [module7_readme.md](module7_readme.md) |
 | 8 Resource-aware training | [module8_readme.md](module8_readme.md) |
-| 9 Federated learning | [../M9_README.md](../M9_README.md) |
+| 9 Federated learning | [module9_readme.md](module9_readme.md) |
 | 16 Local inference | [module16_readme.md](module16_readme.md) |
 
 Older design documents at the repository root: `architecture.md` (platform and team),
@@ -327,7 +327,7 @@ It is a **central** federated learning server (not peer-to-peer), implemented in
    and promote it. The next round starts from it.
 
 Not implemented: differential privacy (Module 10), TLS (Module 11), malicious-update detection
-(Module 12, hook accepts everything). Details: [../M9_README.md](../M9_README.md).
+(Module 12, hook accepts everything). Details: [module9_readme.md](module9_readme.md).
 
 ---
 

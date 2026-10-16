@@ -25,7 +25,6 @@ Major Project/
 │   ├── inference/          Module 16 - local inference
 │   └── local_api/          local ML service that lets the hospital screens run the pipeline
 ├── docs/              documentation: start with docs/README.md, then module1_readme.md ... module16_readme.md
-├── M9_README.md       Module 9 (federated learning) documentation
 ├── requirements.txt   Python packages
 └── *.md               README and architecture documents (see section 9)
 ```
@@ -279,7 +278,7 @@ Local ML service environment variables (all optional):
 | File | Contents |
 |---|---|
 | **`docs/README.md`** | **start here**: module status, how each module works (methods used), how Module 8 adapts to the machine, how one trainer trains every model, run commands |
-| `M9_README.md` | Module 9 federated learning (jobs, rounds, base models, validation, FedAvg, notifications) |
+| `docs/module9_readme.md` | Module 9 federated learning (jobs, rounds, base models, validation, FedAvg, notifications) |
 | `architecture.md` | overall platform architecture and team structure |
 | `ml_pipeline_architecture.md` | ML pipeline architecture and the Hospital Desktop integration |
 | `docs/module1_readme.md` - `docs/module3_readme.md` | authentication, researcher desktop, hospital desktop |
