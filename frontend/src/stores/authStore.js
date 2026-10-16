@@ -25,7 +25,10 @@ export const useAuthStore = create((set) => {
     resetDataStores();
     set({ user, status: 'authenticated' });
     socketService.connect();
-    if (user.role === 'hospital_operator') useMLStore.getState().connect(user.hospital_id);
+    if (user.role === 'hospital_operator') {
+      useMLStore.getState().connect(user.hospital_id);
+      useFederationStore.getState().startFlowerSync(user.hospital_id);   // Flower jobs train in the background
+    }
   };
 
   return {

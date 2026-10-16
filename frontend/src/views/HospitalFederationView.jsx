@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useUiStore } from '../stores/uiStore';
 import { useMLStore } from '../stores/mlStore';
 import { useFederationStore } from '../stores/federationStore';
+import { useAuthStore, selectHospitalId } from '../stores/authStore';
+import { FlowerSteps } from '../components/federation/FlowerSteps';
 import { ml } from '../services/mlClient';
 import FederatedTrainingConfirmModal from '../components/training/FederatedTrainingConfirmModal';
 import {
@@ -15,8 +17,9 @@ const HospitalFederationView = () => {
   const runs = useMLStore((s) => s.runs.data);
   const {
     jobs, hospitalUpdates, taskVocabulary, loadJobs, loadHospitalUpdates, loadTaskVocabulary, participate,
-    requestParticipation,
+    requestParticipation, flower, flowerIssues, flowerDataset, setFlowerDataset,
   } = useFederationStore();
+  const hospitalId = useAuthStore(selectHospitalId);
   const updates = hospitalUpdates.data;
   const availableJobs = jobs.data;
   // Page-local UI state: { job, round } while the participation confirm modal is open, etc.
@@ -112,6 +115,8 @@ const HospitalFederationView = () => {
     setRequestError(null);
     try {
       await requestParticipation(job.federation_job_id, eligibilityResults[job.federation_job_id]);
+      // Flower jobs train automatically with the dataset whose eligibility was sent.
+      if (job.plan?.protocol === 'flower') setFlowerDataset(hospitalId, job.federation_job_id, selectedDatasetId);
     } catch (err) {
       setRequestError({ jobId: job.federation_job_id, text: err.message });
     } finally {
@@ -569,10 +574,16 @@ const HospitalFederationView = () => {
                     return (
                       <>
                         {state === 'PENDING' && note('#3b82f6', 'Request sent. Waiting for the admin to approve your hospital for this job.')}
-                        {state === 'APPROVED' && note('#10b981', 'Approved for this job. You can join its open rounds.')}
+                        {state === 'APPROVED' && job.plan?.protocol !== 'flower' && note('#10b981', 'Approved for this job. You can join its open rounds.')}
                         {state === 'REJECTED' && note('#ef4444', `Not approved${mine.decision_reason ? `: ${mine.decision_reason}` : '.'} You can request again.`)}
                         {requestError?.jobId === job.federation_job_id && note('#ef4444', requestError.text)}
-                        {state === 'APPROVED' ? (
+                        {state === 'APPROVED' && job.plan?.protocol === 'flower' ? (
+                          <FlowerJobState job={job} conn={flower[job.federation_job_id]} issue={flowerIssues[job.federation_job_id]}
+                            datasetId={flowerDataset(hospitalId, job.federation_job_id)} datasets={localDatasets}
+                            selectedDatasetId={selectedDatasetId}
+                            onUseDataset={() => setFlowerDataset(hospitalId, job.federation_job_id, selectedDatasetId)}
+                            onOpenMonitor={() => setActiveTab('training_monitor')} />
+                        ) : state === 'APPROVED' ? (
                           <button className="btn btn-primary" style={wide} disabled={!eligible || !openRound} onClick={() => handleParticipate(job)}>
                             {!eligible ? 'Not Eligible' : openRound ? `Participate in round ${openRound.round_number}` : 'Waiting for a round to open'}
                           </button>
@@ -609,6 +620,32 @@ const HospitalFederationView = () => {
         starting={joining}
         error={joinError}
       />
+    </div>
+  );
+};
+
+/** An approved Flower job on the hospital side: which dataset it trains with and which Flower step is running. */
+const FlowerJobState = ({ job, conn, issue, datasetId, datasets, selectedDatasetId, onUseDataset, onOpenMonitor }) => {
+  const dataset = datasets.find((d) => d.dataset_id === datasetId);
+  const running = job.flower?.running && !['finished', 'failed', 'stopped'].includes(job.flower?.state);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+        Flower job: training starts automatically on this machine when a round begins, while this app is open.
+        {' '}Dataset: <strong style={{ color: '#fff' }}>{dataset?.name || (datasetId ? datasetId : 'not chosen')}</strong>
+        {selectedDatasetId && selectedDatasetId !== datasetId && (
+          <button className="btn btn-secondary" style={{ marginLeft: '8px', fontSize: '10px', padding: '2px 8px' }} onClick={onUseDataset}>
+            Use the selected dataset
+          </button>
+        )}
+      </div>
+      {running ? <FlowerSteps status={conn} issue={issue} />
+        : <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            {job.flower?.state === 'finished' ? 'This job has finished all its rounds.' : 'Waiting for the admin to start the federation.'}
+          </div>}
+      {conn?.state === 'training' && (
+        <button className="btn btn-secondary" style={{ fontSize: '11px' }} onClick={onOpenMonitor}>Open the Training Monitor</button>
+      )}
     </div>
   );
 };

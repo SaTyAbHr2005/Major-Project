@@ -4,6 +4,7 @@ import ml from '../services/mlClient';
 import authService from '../services/authService';
 import { emptyResource, loadResource, unwrap } from './resource';
 import { useMLStore } from './mlStore';
+import trainingService from '../services/trainingService';
 
 const API_URL = import.meta.env?.VITE_API_URL || 'http://localhost:5000/api/v1';
 
@@ -16,12 +17,85 @@ const initial = {
   jobDetails: emptyResource([]),        // admin: every job with its rounds and submitted updates
   taskVocabulary: [],
   hospitalNames: {},                    // admin: hospital_id -> name for round participants
+  flower: {},                           // hospital: job_id -> this machine's Flower connection status
+  flowerIssues: {},                     // hospital: job_id -> why the app could not connect (dataset missing, ...)
 };
+
+// ── Flower jobs on the hospital side ──
+// While the hospital app is open, every approved Flower job whose server runs gets a background connection
+// in the local ML service. Training it starts is followed by the Training Monitor like any other run.
+const LIVE = ['starting', 'waiting_for_hospitals', 'training', 'aggregating', 'calibrating'];
+const DEAD = ['failed', 'disconnected'];
+const RETRY_MS = 30000;
+const datasetKey = (hospitalId, jobId) => `medfl_flower_dataset:${hospitalId}:${jobId}`;
+const store = {
+  get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode: asked again next time */ } },
+};
+let flowerTimer = null;
+const attempts = {};      // job_id -> last connect attempt (ms)
+let followed = null;      // training job id the Training Monitor was pointed at
+
 
 export const useFederationStore = create((set, get) => ({
   ...initial,
   session: 0,
-  reset: () => set((s) => ({ ...initial, session: s.session + 1 })),
+  reset: () => { get().stopFlowerSync?.(); set((s) => ({ ...initial, session: s.session + 1 })); },
+
+  /** The dataset this hospital uses for a Flower job (remembered from its join request). */
+  flowerDataset: (hospitalId, jobId) => store.get(datasetKey(hospitalId, jobId)),
+  setFlowerDataset: (hospitalId, jobId, datasetId) => {
+    store.set(datasetKey(hospitalId, jobId), datasetId);
+    delete attempts[jobId];
+    set((s) => ({ flowerIssues: { ...s.flowerIssues, [jobId]: null } }));
+  },
+
+  startFlowerSync: (hospitalId) => {
+    clearInterval(flowerTimer);
+    const session = get().session;
+    const tick = async () => {
+      if (get().session !== session) return;
+      let jobs;
+      let local;
+      try {
+        jobs = unwrap(await federation.getJobs(), 'jobs') || [];
+        local = (await ml.get('/federation/flower/status')).connections || [];
+      } catch { return; }                       // backend or local service briefly unreachable
+      if (get().session !== session) return;
+      const byJob = Object.fromEntries(local.map((c) => [c.job_id, c]));
+      set((s) => ({ flower: byJob, jobs: s.jobs.status === 'ready' ? { ...s.jobs, data: jobs } : s.jobs }));
+      for (const job of jobs) {
+        const id = job.federation_job_id;
+        const approved = job.my_participation?.authorization_status === 'APPROVED';
+        if (!approved || !job.flower?.running || !LIVE.includes(job.flower.state)) continue;
+        const conn = byJob[id];
+        if (conn && !DEAD.includes(conn.state)) continue;
+        if (Date.now() - (attempts[id] || 0) < RETRY_MS) continue;
+        attempts[id] = Date.now();
+        const datasetId = store.get(datasetKey(hospitalId, id));
+        if (!datasetId) {
+          set((s) => ({ flowerIssues: { ...s.flowerIssues, [id]: 'Choose the dataset this hospital trains with for this job.' } }));
+          continue;
+        }
+        try {
+          await ml.post('/federation/flower/connect', { job, dataset_id: datasetId, address: job.flower.address });
+          set((s) => ({ flowerIssues: { ...s.flowerIssues, [id]: null } }));
+        } catch (e) {
+          set((s) => ({ flowerIssues: { ...s.flowerIssues, [id]: e.message } }));
+        }
+      }
+      // A round's training is an ordinary training job: point the Training Monitor at it.
+      const training = local.find((c) => c.training_job_id && c.state === 'training');
+      if (training && training.training_job_id !== followed
+          && useMLStore.getState().trainingJob?.job_id !== training.training_job_id) {
+        followed = training.training_job_id;
+        try { useMLStore.getState().trackTrainingJob(await trainingService.getJob(followed)); } catch { followed = null; }
+      }
+    };
+    tick();
+    flowerTimer = setInterval(tick, 3000);
+  },
+  stopFlowerSync: () => { clearInterval(flowerTimer); flowerTimer = null; followed = null; },
 
   loadJobs: () => loadResource(set, get, 'jobs', async () => {
     const res = await federation.getJobs();
@@ -62,6 +136,9 @@ export const useFederationStore = create((set, get) => ({
     await federation.decideParticipation(jobId, hospitalId, decision, reason);
     await get().loadJobs();
   },
+  startFlower: async (jobId) => { const res = await federation.startFlower(jobId); await get().loadJobs(); return res; },
+  stopFlower: async (jobId) => { await federation.stopFlower(jobId); await get().loadJobs(); },
+  aggregateFlowerNow: (jobId) => federation.aggregateFlowerNow(jobId),
   evaluateModel: async (id) => { await federation.evaluateModel(id); await get().loadGlobalModels(); },
   promoteModel: async (id, evalId) => { await federation.promoteModel(id, evalId); await get().loadGlobalModels(); },
 

@@ -50,6 +50,13 @@ export const evaluateModel = (globalModelId) => request('POST', '/models/evaluat
 export const getEvaluationProgress = (globalModelId) => request('GET', `/models/${encodeURIComponent(globalModelId)}/evaluation-progress`);
 export const promoteModel = (globalModelId, evalRecordId) => request('POST', '/models/promote', { global_model_id: globalModelId, eval_record_id: evalRecordId });
 
+// ── Flower jobs (protocol "flower"): the Flower server runs the planned rounds ──
+export const startFlower = (jobId) => request('POST', `/jobs/${encodeURIComponent(jobId)}/flower/start`);
+export const stopFlower = (jobId) => request('POST', `/jobs/${encodeURIComponent(jobId)}/flower/stop`);
+export const aggregateFlowerNow = (jobId) => request('POST', `/jobs/${encodeURIComponent(jobId)}/flower/aggregate-now`);
+// Admin: full status (hospitals, events); hospital: the round and its own entry.
+export const getFlowerStatus = (jobId) => request('GET', `/jobs/${encodeURIComponent(jobId)}/flower/status`);
+
 // ── Hospital: Own federation status ─────────────────────────
 export const getHospitalFederationStatus = () => request('GET', '/hospital-status');
 // Join requests: the hospital sends its local eligibility summary; the admin approves or rejects.
