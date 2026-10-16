@@ -335,7 +335,10 @@ Not implemented: differential privacy (Module 10), TLS (Module 11), malicious-up
 
 ## 7. Known limitations (current)
 
-- Hospital and federation server must share a machine (updates are submitted as a folder path).
+- Manual-round jobs: hospital and federation server must share a machine (updates are submitted as a
+  folder path). Flower jobs send the weights over the Flower connection instead; for hospitals on other
+  machines, set `FLOWER_PUBLIC_HOST` to the server's address. So far this has only been run with
+  everything on one machine.
 - No TLS, no differential privacy, no Byzantine defence.
 - Module 5's grouped split keeps patients/lesions together but does not stratify by class. Check
   the per-split class counts in the report.
