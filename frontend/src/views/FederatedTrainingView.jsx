@@ -269,9 +269,23 @@ export const FederatedTrainingView = () => {
     run: () => deleteRound(round.round_id),
   });
 
-  // Archived jobs are read-only records (kept because they have history); they get their own section.
-  const activeJobs = jobs.filter((j) => j.status !== 'ARCHIVED');
+  // Three sections: jobs still working, jobs that finished their training plan, and archived jobs
+  // (read-only records, kept because they have history).
   const archivedJobs = jobs.filter((j) => j.status === 'ARCHIVED');
+  const completedJobs = jobs.filter((j) => j.status !== 'ARCHIVED' && (j.status === 'COMPLETED' || j.plan?.finished));
+  const activeJobs = jobs.filter((j) => !archivedJobs.includes(j) && !completedJobs.includes(j));
+  const section = (title, list, hint, open, empty) => (
+    <details className="card" open={open} style={{ background: 'var(--bg-nested)', padding: '12px 16px' }}>
+      <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>
+        {title} ({list.length})
+        <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)' }}>{hint}</span>
+      </summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
+        {list.map(renderJob)}
+        {list.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{empty}</div>}
+      </div>
+    </details>
+  );
   const renderJob = (job) => {
     const readOnly = job.status === 'ARCHIVED';
     return (
@@ -559,23 +573,12 @@ export const FederatedTrainingView = () => {
         <div style={{ color: '#fff' }}>Loading jobs...</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {activeJobs.map(renderJob)}
-          {activeJobs.length === 0 && (
-            <div style={{ color: 'var(--text-muted)' }}>{archivedJobs.length ? 'No active federation jobs.' : 'No federation jobs found.'}</div>
-          )}
-          {archivedJobs.length > 0 && (
-            <details className="card" style={{ background: 'var(--bg-nested)', padding: '12px 16px' }}>
-              <summary style={{ cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: '#cbd5e1' }}>
-                Archived jobs ({archivedJobs.length})
-                <span style={{ marginLeft: '8px', fontSize: '11px', fontWeight: 400, color: 'var(--text-muted)' }}>
-                  read-only: kept because they have rounds or global models
-                </span>
-              </summary>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginTop: '12px' }}>
-                {archivedJobs.map(renderJob)}
-              </div>
-            </details>
-          )}
+          {jobs.length === 0 && <div style={{ color: 'var(--text-muted)' }}>No federation jobs found.</div>}
+          {jobs.length > 0 && section('In progress', activeJobs, 'training, or waiting for hospitals or the next round', true,
+            'No job is training right now. Create a job to start one.')}
+          {completedJobs.length > 0 && section('Completed', completedJobs,
+            'finished their training plan; their global models are in Federation Models')}
+          {archivedJobs.length > 0 && section('Archived', archivedJobs, 'read-only: kept because they have rounds or global models')}
         </div>
       )}
     </div>
