@@ -57,29 +57,44 @@ export const AdminFederationModelsView = () => {
 
   useEffect(() => { loadModels(); }, []);
 
-  const handleEvaluate = async (globalModelId) => {
-    setActionLoading(globalModelId);
-    setActionError(null);
-    const clickedAt = Date.now();
-    setEvalProgress({ globalModelId, clickedAt, status: 'starting' });
-    // The evaluation request stays open until it finishes; meanwhile poll the progress file.
+  // An evaluation keeps running on the server when this screen is left; on return, pick it up again.
+  useEffect(() => {
+    const running = !evalProgress && (models || []).find((m) => m.evaluation_started_at);
+    if (running) setEvalProgress({ globalModelId: running.global_model_id, clickedAt: running.evaluation_started_at, status: 'starting' });
+  }, [models]);
+
+  // Poll the progress file while an evaluation runs; stops when the screen is left.
+  const evalId = evalProgress?.globalModelId;
+  const evalSince = evalProgress?.clickedAt;
+  useEffect(() => {
+    if (!evalId) return undefined;
     const timer = setInterval(async () => {
       try {
-        const { progress } = await getEvaluationProgress(globalModelId);
+        const { running, progress } = await getEvaluationProgress(evalId);
         // Ignore the file left by an earlier evaluation of the same model.
-        if (progress && Date.parse(progress.started_at) >= clickedAt - 2000) {
-          setEvalProgress({ globalModelId, clickedAt, ...progress });
+        const current = progress && Date.parse(progress.started_at) >= evalSince - 2000;
+        if (running) {
+          if (current) setEvalProgress((p) => (p?.globalModelId === evalId ? { ...p, ...progress } : p));
+          return;
         }
+        // Finished, possibly while this screen was closed (the request that started it then reports nothing here).
+        if (current && progress.status === 'failed') setActionError(`Evaluation failed: ${progress.error || 'see the backend log'}`);
+        setEvalProgress((p) => (p?.globalModelId === evalId ? null : p));
+        loadModels();
       } catch { /* a missed poll is fine; the next one retries */ }
     }, 1500);
+    return () => clearInterval(timer);
+  }, [evalId, evalSince]);
+
+  const handleEvaluate = async (globalModelId) => {
+    setActionError(null);
+    setEvalProgress({ globalModelId, clickedAt: Date.now(), status: 'starting' });
     try {
       await evaluateModel(globalModelId);
     } catch (err) {
       setActionError(`Evaluation failed: ${err.message}`);
     } finally {
-      clearInterval(timer);
-      setEvalProgress(null);
-      setActionLoading(null);
+      setEvalProgress((p) => (p?.globalModelId === globalModelId ? null : p));
     }
   };
 
@@ -204,6 +219,7 @@ export const AdminFederationModelsView = () => {
                   const evals = model.evaluations || [];
                   const latestEval = evals.length > 0 ? evals[0] : null;
                   const isLoading = actionLoading === model.global_model_id;
+                  const isEvaluating = evalProgress?.globalModelId === model.global_model_id;
 
                   return (
                     <div key={model.global_model_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
@@ -363,10 +379,10 @@ export const AdminFederationModelsView = () => {
                               <button
                                 className="btn btn-primary"
                                 onClick={() => handleEvaluate(model.global_model_id)}
-                                disabled={isLoading}
+                                disabled={isLoading || isEvaluating}
                                 style={{ fontSize: '12px' }}
                               >
-                                {isLoading ? 'Evaluating...' : <><Award size={13} /> Start Evaluation</>}
+                                {isEvaluating ? 'Evaluating...' : <><Award size={13} /> Start Evaluation</>}
                               </button>
                             )}
                             {latestEval && model.status !== 'MAIN' && model.status !== 'HISTORICAL' && model.status !== 'EVALUATED_NOT_PROMOTED' && (

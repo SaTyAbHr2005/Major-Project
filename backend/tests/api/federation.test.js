@@ -669,6 +669,53 @@ describe('POST /api/v1/federation/models/evaluate', () => {
       .send({ global_model_id: 'GM-001' });
     expect(res.status).toBe(403);
   });
+
+  test('A running evaluation is reported and a second start of the same model is refused (409)', async () => {
+    const { spawn } = require('child_process');
+    const { EventEmitter } = require('events');
+    const { Readable } = require('stream');
+    // A Python child that answers only when finish() is called, like a long evaluation.
+    const child = (answer) => {
+      const c = new EventEmitter();
+      c.stdout = new Readable({ read() {} });
+      c.stderr = new Readable({ read() {} });
+      c.stdin = { write: jest.fn(), end: jest.fn() };
+      c.finish = () => { c.stdout.push(JSON.stringify(answer)); c.stdout.push(null); c.emit('close', 0); };
+      return c;
+    };
+    const evaluation = child({ success: true, evaluation: {} });
+    spawn.mockImplementationOnce(() => evaluation);
+    const first = request(app)
+      .post('/api/v1/federation/models/evaluate')
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ global_model_id: 'GM-RUN' })
+      .then((r) => r);
+    await new Promise((r) => setTimeout(r, 50));   // the first request is now waiting on Python
+
+    const second = await request(app)
+      .post('/api/v1/federation/models/evaluate')
+      .set('Authorization', `Bearer ${ADMIN()}`)
+      .send({ global_model_id: 'GM-RUN' });
+    expect(second.status).toBe(409);
+
+    const list = child({ success: true, models: [{ global_model_id: 'GM-RUN' }, { global_model_id: 'GM-IDLE' }] });
+    spawn.mockImplementationOnce(() => { setImmediate(list.finish); return list; });
+    const models = await request(app).get('/api/v1/federation/models').set('Authorization', `Bearer ${ADMIN()}`);
+    expect(typeof models.body.models[0].evaluation_started_at).toBe('number');
+    expect(models.body.models[1].evaluation_started_at).toBeNull();
+
+    const progress = await request(app)
+      .get('/api/v1/federation/models/GM-RUN/evaluation-progress')
+      .set('Authorization', `Bearer ${ADMIN()}`);
+    expect(progress.body.running).toBe(true);
+
+    evaluation.finish();
+    expect((await first).status).toBe(200);
+    const after = await request(app)
+      .get('/api/v1/federation/models/GM-RUN/evaluation-progress')
+      .set('Authorization', `Bearer ${ADMIN()}`);
+    expect(after.body.running).toBe(false);
+  });
 });
 
 describe('GET /api/v1/federation/models/:global_model_id/evaluation-progress', () => {

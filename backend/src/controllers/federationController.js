@@ -257,9 +257,17 @@ exports.aggregateRound = async (req, res) => {
   }
 };
 
+// Evaluations running in this backend process: global model id -> start time (ms). Kept in memory, so
+// the admin screen can find a running evaluation again after switching screens, a second start of the
+// same model is refused, and after a backend restart no model looks stuck because of an old progress file.
+const evaluating = new Map();
+
 exports.listGlobalModels = async (req, res) => {
   try {
     const result = await callPythonAdapter({ action: 'list_global_models' });
+    (result.models || []).forEach((m) => {
+      m.evaluation_started_at = evaluating.get(m.global_model_id) || null;
+    });
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -267,11 +275,18 @@ exports.listGlobalModels = async (req, res) => {
 };
 
 exports.evaluateModel = async (req, res) => {
+  const id = req.body?.global_model_id;
+  if (evaluating.has(id)) {
+    return res.status(409).json({ success: false, error: 'This model is already being evaluated.' });
+  }
+  evaluating.set(id, Date.now());
   try {
     const result = await callPythonAdapter({ action: 'evaluate', ...req.body });
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  } finally {
+    evaluating.delete(id);
   }
 };
 
@@ -284,9 +299,9 @@ exports.getEvaluationProgress = async (req, res) => {
   }
   const file = path.resolve(__dirname, '../../../federation_artifacts/evaluation_progress', `${id}.json`);
   try {
-    res.json({ success: true, progress: JSON.parse(await fs.readFile(file, 'utf8')) });
+    res.json({ success: true, running: evaluating.has(id), progress: JSON.parse(await fs.readFile(file, 'utf8')) });
   } catch (err) {
-    if (err.code === 'ENOENT') return res.json({ success: true, progress: null });
+    if (err.code === 'ENOENT') return res.json({ success: true, running: evaluating.has(id), progress: null });
     res.status(500).json({ success: false, error: err.message });
   }
 };
