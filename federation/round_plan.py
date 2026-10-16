@@ -6,6 +6,9 @@ Stored in the job's existing JSON fields (no database schema change):
 
 aggregation_configuration
     strategy              "fedavg" (default) or "fedprox"
+    protocol              "manual" (default: admin and hospitals act per round) or "flower" (a Flower
+                          server runs the planned rounds automatically; needs total_rounds and
+                          round_duration_hours, the deadline of each round)
     total_rounds          integer >= 1. Absent = open-ended: the admin opens rounds until they stop.
     auto_continue         after a successful aggregation, open the next round automatically.
                           Defaults to True when total_rounds is set.
@@ -24,6 +27,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 
 STRATEGIES = ("fedavg", "fedprox")
+PROTOCOLS = ("manual", "flower")
 EARLY_STOPPING_METRICS = ("accuracy", "f1")
 # Rounds that produced a global model.
 FINISHED_ROUND_STATUSES = {"GLOBAL_MODEL_CREATED", "EVALUATION_PENDING", "COMPLETED"}
@@ -41,6 +45,15 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
     """Raises ValueError naming the first invalid setting; never substitutes a default for a bad value."""
     agg = aggregation_configuration or {}
     reqs = training_requirements or {}
+
+    proto = agg.get("protocol", "manual")
+    if proto not in PROTOCOLS:
+        raise ValueError(f"protocol must be one of {list(PROTOCOLS)}, got {proto!r}")
+    if proto == "flower":
+        if agg.get("total_rounds") is None:
+            raise ValueError("Flower jobs need total_rounds: the Flower server runs exactly that many rounds.")
+        if agg.get("auto_continue") is False:
+            raise ValueError("Flower jobs run their rounds automatically; auto_continue cannot be turned off.")
 
     strategy = agg.get("strategy", "fedavg")
     if strategy not in STRATEGIES:
@@ -75,6 +88,10 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
         patience = es.get("patience")
         if not _is_int(patience) or patience < 1:
             raise ValueError(f"early_stopping.patience must be an integer >= 1, got {patience!r}")
+
+
+def protocol(agg: Dict[str, Any]) -> str:
+    return (agg or {}).get("protocol", "manual")
 
 
 def auto_continue(agg: Dict[str, Any]) -> bool:
@@ -115,6 +132,7 @@ def plan_status(agg: Dict[str, Any], rounds: List[Dict[str, Any]], scores: List[
 
     return {
         "strategy": agg.get("strategy", "fedavg"),
+        "protocol": protocol(agg),
         "total_rounds": total,
         "rounds_completed": len(completed),
         # None when the job is finished or every planned round already exists.

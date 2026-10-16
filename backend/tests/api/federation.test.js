@@ -1186,3 +1186,136 @@ describe('Federation participation requests', () => {
     expect(res.body.error).toMatch(/waiting for admin approval/);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Flower jobs: start / stop / status / report / aggregate-now and notifications
+// ═════════════════════════════════════════════════════════════════════════════
+describe('Flower jobs', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const Hospital = require('../../src/authentication/models/Hospital');
+  const Notification = require('../../src/models/Notification');
+  const flower = require('../../src/services/flowerService');
+  const JOB = 'JOB_FLWR_TEST';
+  const dir = path.resolve(__dirname, '../../../federation_artifacts/flower', JOB);
+  const statusFile = path.join(dir, 'status.json');
+  const flowerJob = (protocol = 'flower', finished = false) => ({
+    federation_job_id: JOB, minimum_participants: 1,
+    plan: { protocol, finished, total_rounds: 2, rounds_completed: 0 },
+  });
+  const now = () => new Date().toISOString();
+  const writeStatus = (extra = {}) => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(statusFile, JSON.stringify({
+      job_id: JOB, state: 'training', fl_round: 1, total_rounds: 2, round_id: `${JOB}_R1`, phase: 'train', closing: false,
+      minimum_participants: 1, address: '127.0.0.1:8090', pid: 0, updated_at: now(),
+      hospitals: { 'HOSP-ALPHA': { state: 'training' }, 'HOSP-BETA': { state: 'training' } },
+      events: [{ at: now(), type: 'round_started', text: 'Round 1: 2 hospital(s) training' }], ...extra,
+    }));
+  };
+  let flowerChild;
+  const mockSpawn = (job) => {
+    const { spawn } = require('child_process');
+    const { EventEmitter } = require('events');
+    const { Readable } = require('stream');
+    spawn.mockImplementation((cmd, args) => {
+      const child = new EventEmitter();
+      child.stdout = new Readable({ read() {} });
+      child.stderr = new Readable({ read() {} });
+      if (args.includes('federation.flower_app')) {          // the long-running Flower server
+        child.pid = 4242;
+        child.kill = jest.fn(() => setImmediate(() => child.emit('exit', 0)));
+        flowerChild = child;
+        return child;
+      }
+      child.stdin = { write: jest.fn((d) => { lastSpawnPayload = JSON.parse(d); }), end: jest.fn() };
+      setImmediate(() => { child.stdout.push(JSON.stringify({ success: true, jobs: [].concat(job || []) })); child.stdout.push(null); child.emit('close', 0); });
+      return child;
+    });
+  };
+  const post = (url, token = ADMIN(), body = {}) => request(app).post(`/api/v1/federation${url}`).set('Authorization', `Bearer ${token}`).send(body);
+  const get = (url, token = ADMIN()) => request(app).get(`/api/v1/federation${url}`).set('Authorization', `Bearer ${token}`);
+
+  afterEach(async () => {
+    if (flower.isRunning(JOB)) await post(`/jobs/${JOB}/flower/stop`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    flower._reset();
+  });
+
+  test('Hospitals cannot start, stop or close a Flower round (403)', async () => {
+    for (const action of ['start', 'stop', 'aggregate-now']) {
+      expect((await post(`/jobs/${JOB}/flower/${action}`, HOSP_ALPHA())).status).toBe(403);
+    }
+  });
+
+  test('Start refuses unknown, manual and finished jobs', async () => {
+    mockSpawn(null);
+    expect((await post(`/jobs/${JOB}/flower/start`)).status).toBe(404);
+    mockSpawn(flowerJob('manual'));
+    expect((await post(`/jobs/${JOB}/flower/start`)).status).toBe(400);
+    mockSpawn(flowerJob('flower', true));
+    expect((await post(`/jobs/${JOB}/flower/start`)).status).toBe(400);
+  });
+
+  test('Start launches the Flower server once; stop ends it', async () => {
+    mockSpawn(flowerJob());
+    const res = await post(`/jobs/${JOB}/flower/start`);
+    expect(res.status).toBe(202);
+    const { spawn } = require('child_process');
+    const args = spawn.mock.calls.find((c) => c[1].includes('federation.flower_app'))[1];
+    expect(args).toEqual(expect.arrayContaining(['--job-id', JOB, '--status-file', statusFile]));
+    expect((await post(`/jobs/${JOB}/flower/start`)).status).toBe(409);
+    expect((await post(`/jobs/${JOB}/flower/stop`)).status).toBe(200);
+    expect(flowerChild.kill).toHaveBeenCalled();
+  });
+
+  test('Status: admins see everything, a hospital only its own entry and no events', async () => {
+    expect((await get(`/jobs/${JOB}/flower/status`)).body.status.state).toBe('not_started');
+    writeStatus();
+    const admin = (await get(`/jobs/${JOB}/flower/status`)).body.status;
+    expect(Object.keys(admin.hospitals)).toEqual(['HOSP-ALPHA', 'HOSP-BETA']);
+    expect(admin.events).toHaveLength(1);
+    const hosp = (await get(`/jobs/${JOB}/flower/status`, HOSP_ALPHA())).body.status;
+    expect(hosp.hospital).toEqual(expect.objectContaining({ state: 'training' }));
+    expect(hosp.hospitals).toBeUndefined();
+    expect(hosp.events).toBeUndefined();
+    expect(hosp.address).toBe('127.0.0.1:8090');
+  });
+
+  test('A status file whose server stopped updating it is reported stale', async () => {
+    writeStatus({ updated_at: new Date(Date.now() - 60000).toISOString() });
+    expect((await get(`/jobs/${JOB}/flower/status`)).body.status.stale).toBe(true);
+  });
+
+  test('Hospitals report their step; Aggregate now needs the minimum of sent updates', async () => {
+    writeStatus();
+    let r = await post(`/jobs/${JOB}/flower/report`, HOSP_ALPHA(), { round_id: `${JOB}_R1`, state: 'training', epoch: 1, total_epochs: 3 });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual(expect.objectContaining({ round_id: `${JOB}_R1`, closing: false }));
+    expect((await post(`/jobs/${JOB}/flower/aggregate-now`)).status).toBe(409);       // nobody has sent yet
+    expect((await get(`/jobs/${JOB}/flower/status`)).body.status.hospitals['HOSP-ALPHA'].progress)
+      .toEqual(expect.objectContaining({ epoch: 1, total_epochs: 3 }));
+
+    await post(`/jobs/${JOB}/flower/report`, HOSP_ALPHA(), { round_id: `${JOB}_R1`, state: 'waiting_for_others' });
+    expect((await post(`/jobs/${JOB}/flower/aggregate-now`)).status).toBe(200);
+    expect(fs.readFileSync(path.join(dir, 'close_round'), 'utf8')).toBe(`${JOB}_R1`);
+  });
+
+  test("The job list carries each Flower job's run status (manual jobs get none)", async () => {
+    writeStatus();
+    mockSpawn([flowerJob(), { federation_job_id: 'JOB_MANUAL', plan: { protocol: 'manual' } }]);
+    const jobs = (await get('/jobs', HOSP_ALPHA())).body.jobs;
+    expect(jobs.find((j) => j.federation_job_id === JOB).flower)
+      .toEqual(expect.objectContaining({ state: 'training', fl_round: 1, total_rounds: 2, address: '127.0.0.1:8090', closing: false }));
+    expect(jobs.find((j) => j.federation_job_id === 'JOB_MANUAL').flower).toBeUndefined();
+  });
+
+  test('A round_opened event notifies the hospitals once', async () => {
+    writeStatus({ events: [{ at: now(), type: 'round_opened', text: 'Round 1 opened', round_id: `${JOB}_R1`, round_number: 1 }] });
+    Hospital.find.mockResolvedValue([{ hospital_id: 'HOSP-ALPHA' }]);
+    await flower._processEvents(JOB);
+    await flower._processEvents(JOB);
+    expect(Notification.insertMany).toHaveBeenCalledTimes(1);
+    expect(Notification.insertMany.mock.calls[0][0][0]).toEqual(expect.objectContaining({ type: 'ROUND_OPEN', round_id: `${JOB}_R1` }));
+  });
+});

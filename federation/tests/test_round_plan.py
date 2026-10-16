@@ -29,6 +29,8 @@ MAPPING = {"Parasitized": 0, "Uninfected": 1}
     ({"strategy": "fedprox"}, {"proximal_mu": 0.01}),
     ({"total_rounds": 5, "auto_continue": False}, {}),
     ({"total_rounds": 5, "round_duration_hours": 2, "early_stopping": {"metric": "f1", "min_delta": 0.01, "patience": 2}}, {}),
+    ({"protocol": "manual"}, {}),
+    ({"protocol": "flower", "total_rounds": 3, "round_duration_hours": 2}, {}),
 ])
 def test_valid_plans(agg, reqs):
     validate_plan(agg, reqs)
@@ -48,10 +50,19 @@ def test_valid_plans(agg, reqs):
     ({"total_rounds": 3, "auto_continue": False, "early_stopping": {"patience": 0}}, {}, "patience"),
     ({"total_rounds": 3, "auto_continue": False, "early_stopping": {"metric": "loss", "patience": 1}}, {}, "metric"),
     ({"total_rounds": 3, "auto_continue": False, "early_stopping": {"min_delta": -1, "patience": 1}}, {}, "min_delta"),
+    ({"protocol": "p2p"}, {}, "protocol must be"),
+    ({"protocol": "flower"}, {}, "Flower jobs need total_rounds"),
+    ({"protocol": "flower", "total_rounds": 3}, {}, "round_duration_hours"),
+    ({"protocol": "flower", "total_rounds": 3, "round_duration_hours": 2, "auto_continue": False}, {}, "Flower jobs run their rounds automatically"),
 ])
 def test_invalid_plans_are_rejected(agg, reqs, msg):
     with pytest.raises(ValueError, match=msg):
         validate_plan(agg, reqs)
+
+
+def test_protocol_defaults_to_manual_and_is_reported():
+    assert plan_status({}, [], [])["protocol"] == "manual"
+    assert plan_status({"protocol": "flower", "total_rounds": 2, "round_duration_hours": 1}, [], [])["protocol"] == "flower"
 
 
 # ── stopping rules ────────────────────────────────────────────────────────────────────────
@@ -164,3 +175,20 @@ def test_job_runs_its_planned_rounds_then_completes(tmp_path):
     assert job["status"] == "COMPLETED" and job["plan"]["rounds_completed"] == 2
     extra = adapter(tmp_path, action="create_round", job_id="JOB1", round_id="JOB1_R3", round_number=3, deadline=future())
     assert not extra["success"] and "finished" in extra["error"]
+
+
+def test_an_archived_job_is_read_only(tmp_path):
+    # Delete on a job with history archives it (the record stays); an archived job opens no more rounds.
+    assert adapter(tmp_path, action="create_job", job_id="JOB1", task="Malaria", architecture=ARCH, num_classes=2,
+                   class_mapping=MAPPING, minimum_participants=2)["success"]
+    assert adapter(tmp_path, action="create_round", job_id="JOB1", round_id="JOB1_R1", round_number=1, deadline=future())["success"]
+    for h in ("HOSP_A", "HOSP_B"):
+        assert submit(tmp_path, "JOB1_R1", h, 0.0)["status"] == "ACCEPTED"
+    assert adapter(tmp_path, action="aggregate", round_id="JOB1_R1", force_close=True)["success"]
+
+    assert adapter(tmp_path, action="delete_job", job_id="JOB1")["action_taken"] == "archived"
+    job = adapter(tmp_path, action="list_jobs")["jobs"][0]
+    assert job["status"] == "ARCHIVED"
+    assert job["plan"]["finished"] and "archived" in job["plan"]["reason"] and job["plan"]["next_round_number"] is None
+    extra = adapter(tmp_path, action="create_round", job_id="JOB1", round_id="JOB1_R2", round_number=2, deadline=future())
+    assert not extra["success"] and "archived" in extra["error"]

@@ -38,6 +38,7 @@ import tempfile
 import threading
 import time
 import traceback
+from typing import Optional
 import urllib.error
 import urllib.request
 import uuid
@@ -890,15 +891,11 @@ def r_submit_handoff(h, m, q):
     return _submit_handoff(h.ws, model_id, job_id, round_id, token)
 
 
-def r_federated_train(h, m, q):
+def build_federated_training(ws, job: dict, dataset_id: str, round_info: Optional[dict]):
+    """The Module 8 training command of a federated run (manual Participate and Flower rounds share it).
+    Returns (cmd, meta, model_id, run_dir). round_info: the round's id and base model, or None."""
     from hospital_client.federation.manifest_filter import create_job_manifests
-    body = h.json_body()
-    job = body.get("job")
-    dataset_id = body.get("dataset_id")
-    if not job or not dataset_id:
-        raise ApiError(400, "job and dataset_id are required")
-    ws = h.ws
-    # Both become folder/file names below, and they arrive in the request body.
+    # Both become folder/file names below, and they arrive in request bodies.
     if not MODEL_ID_RE.match(str(job.get("federation_job_id") or "")) or not ARCH_RE.match(str(job.get("architecture") or "")):
         raise ApiError(400, "Invalid federation job id or architecture.")
 
@@ -923,21 +920,22 @@ def r_federated_train(h, m, q):
         raise ApiError(400, "Federation job id is too long.")
 
     os.makedirs(ws.trained, exist_ok=True)
+    round_id = (round_info or {}).get("round_id")
     meta = {
         "dataset_id": dataset_id,
         "dataset_name": dataset_name,
         "choice": "federated",
         "model_id": model_id,
         "job_id": job["federation_job_id"],
-        "round_id": body.get("round_id"),
+        "round_id": round_id,
         "run_dir": run_dir,
         "started_at": datetime.now().isoformat()
     }
-    
+
     # Build the M8 train command pointing at the run-isolated directory
     # --canonical-mapping passes the job's class mapping to M7 via M8
     cmd = _module_cmd(
-        "hospital_client.resource_training", "train", 
+        "hospital_client.resource_training", "train",
         "--dataset", run_dir,
         "--output", ws.trained,
         "--model-id", model_id,
@@ -958,21 +956,33 @@ def r_federated_train(h, m, q):
     # FedProx jobs set the proximal term weight; Module 9 rejects updates trained with another value.
     if reqs.get("proximal_mu"):
         cmd.extend(["--proximal-mu", str(reqs["proximal_mu"])])
-    
+
+    if round_info and round_info.get("base_model_id"):
+        cmd.extend([
+            "--canonical-base-model-id", round_info["base_model_id"],
+            "--canonical-base-model-version", str(round_info["base_model_version"]),
+            "--canonical-base-model-checksum", round_info["base_model_checksum"]
+        ])
+    return cmd, meta, model_id, run_dir
+
+
+def r_federated_train(h, m, q):
+    body = h.json_body()
+    job = body.get("job")
+    dataset_id = body.get("dataset_id")
+    if not job or not dataset_id:
+        raise ApiError(400, "job and dataset_id are required")
+    ws = h.ws
     round_id = body.get("round_id")
     auth_token = body.get("auth_token")
     api_url = body.get("api_url")
 
     # Find the active round to extract canonical base model provenance
     active_round = next((r for r in job.get("rounds", []) if r["round_id"] == round_id), None)
+    cmd, meta, model_id, _ = build_federated_training(ws, job, dataset_id, active_round or {"round_id": round_id})
     if active_round and active_round.get("base_model_id"):
         token = h.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         _ensure_base_model(ws, job["architecture"], active_round, token)
-        cmd.extend([
-            "--canonical-base-model-id", active_round["base_model_id"],
-            "--canonical-base-model-version", str(active_round["base_model_version"]),
-            "--canonical-base-model-checksum", active_round["base_model_checksum"]
-        ])
 
     def _finalize(j):
         res = training_run(ws, model_id)
@@ -987,6 +997,169 @@ def r_federated_train(h, m, q):
     job_handle = start_job("train", cmd, _finalize, meta,
                            owner=ws.hospital_id, on_exit=_run_meta_writer(ws, model_id, meta))
     return 202, job_handle.to_dict()
+
+
+# ---------------------------------------------------------------- Flower jobs
+
+ADDRESS_RE = re.compile(r"^[A-Za-z0-9.\-]+:\d{2,5}$")
+FLOWER_CALIBRATION_BATCHES = 50
+FLOWER_GPU_WAIT_SECONDS = 3600   # calibration waits at most this long for another training on this machine
+_flower = {}                      # (hospital_id, job_id) -> FlowerConnection
+_flower_lock = threading.Lock()
+
+
+def _save_received_base_model(ws, job: dict, parameters, round_info: dict) -> None:
+    """Stores the model the Flower server sent as the round's base checkpoint, where the Trainer reads it
+    (trained/<architecture>/models/<id>/v<version>). Refused unless its checksum is the round's."""
+    from hospital_client.model_management.config import ModelConfig
+    from hospital_client.model_management.parameters import get_parameters, set_parameters
+    from hospital_client.model_management.registry import build_model, get_architecture_info
+    from hospital_client.model_management.store import ModelStore
+    from hospital_client.training.federation import _compute_parameters_checksum
+    model_id, version = str(round_info.get("base_model_id") or ""), round_info.get("base_model_version")
+    if not (MODEL_ID_RE.match(model_id) and isinstance(version, int) and version >= 1):
+        raise ApiError(400, "The round's base model reference is invalid.")
+    arch = job["architecture"]
+    store = ModelStore(os.path.join(ws.trained, arch, "models"))
+    if os.path.isdir(os.path.join(store.root, model_id, f"v{version}")):
+        return
+    config = ModelConfig(architecture=arch, num_classes=int(job.get("num_classes") or len(job.get("class_mapping") or {})),
+                         input_size=tuple(get_architecture_info(arch).default_input_size))
+    model = build_model(config)
+    set_parameters(model, parameters)
+    if _compute_parameters_checksum(get_parameters(model)) != round_info.get("base_model_checksum"):
+        raise ApiError(409, f"The model received for {model_id} v{version} does not match the round's checksum; "
+                            "it was not used.")
+    store.save_checkpoint(model, config, model_id, status="trained", version=version)
+
+
+def _flower_runner(ws, job: dict, dataset_id: str):
+    """(run_training, calibrate) for a FlowerConnection: the same training job as Participate, then
+    BatchNorm calibration on the run's training images."""
+    last = {}
+
+    def run_training(parameters, config, cancel, on_job):
+        round_info = {k: config[k] for k in ("round_id", "base_model_id", "base_model_checksum")}
+        round_info["base_model_version"] = int(config["base_model_version"])
+        _save_received_base_model(ws, job, parameters, round_info)
+        cmd, meta, model_id, run_dir = build_federated_training(ws, job, dataset_id, round_info)
+        last["run_dir"] = run_dir
+        # Hospitals sharing this machine also share its GPU: wait for it instead of failing the round.
+        while True:
+            try:
+                handle = start_job("train", cmd, lambda j: training_run(ws, model_id), meta,
+                                   owner=ws.hospital_id, on_exit=_run_meta_writer(ws, model_id, meta))
+                break
+            except ApiError as e:
+                if e.status != 409:
+                    raise
+                if cancel.wait(2.0):
+                    raise RuntimeError("The round closed while this hospital waited for the machine's GPU.")
+        on_job(handle.id)
+        while handle.status == "running":
+            if cancel.wait(1.0):
+                cancel_job(handle)
+                break
+        while handle.status == "running":
+            time.sleep(0.5)
+        if handle.status != "succeeded":
+            raise RuntimeError(handle.error or f"Training {handle.status}.")
+        from hospital_client.training.federation import FederationHandoff
+        d = ws.run_dir(model_id)
+        handoff_dir = os.path.join(d, f"{model_id}_federation_handoff") if d else None
+        if not handoff_dir or not os.path.isdir(handoff_dir):
+            raise RuntimeError("Training finished without a federation update (see the training log).")
+        handoff = FederationHandoff.load(handoff_dir)
+        return handoff.parameters, handoff.num_train_samples, handoff.to_dict()
+
+    def calibrate(parameters, config):
+        import torch
+        from torch.utils.data import DataLoader
+        from hospital_client.federation.bn_calibration import calibrate_batchnorm
+        from hospital_client.model_management.config import ModelConfig
+        from hospital_client.model_management.parameters import get_parameters, set_parameters
+        from hospital_client.model_management.registry import build_model, get_architecture_info
+        from hospital_client.training.dataset import ManifestImageDataset, load_manifest
+        if not last.get("run_dir"):
+            raise RuntimeError("No training run of this job on this machine to calibrate with.")
+        deadline = time.time() + FLOWER_GPU_WAIT_SECONDS
+        while any(j.kind == "train" and j.status == "running" for j in list(_jobs.values())):
+            if time.time() > deadline:
+                raise RuntimeError("A training run is still in progress on this machine; calibration gave up waiting.")
+            time.sleep(2.0)
+        arch = job["architecture"]
+        cfg = ModelConfig(architecture=arch, num_classes=int(job.get("num_classes") or len(job["class_mapping"])),
+                          input_size=tuple(get_architecture_info(arch).default_input_size), color_mode="RGB")
+        model = build_model(cfg)
+        set_parameters(model, parameters)
+        model.to("cuda" if torch.cuda.is_available() else "cpu")
+        train = load_manifest(os.path.join(last["run_dir"], "train_manifest.json"))
+        dataset = ManifestImageDataset(train, job["class_mapping"], cfg.color_mode, tuple(cfg.input_size))
+        loader = DataLoader(dataset, batch_size=32, shuffle=True, generator=torch.Generator().manual_seed(0))
+        calibrate_batchnorm(model, loader, FLOWER_CALIBRATION_BATCHES)
+        return get_parameters(model.cpu()), len(dataset)
+
+    return run_training, calibrate
+
+
+def _backend_reporter(job_id: str, conn_ref: dict):
+    """Tells the backend this hospital's step (and epoch); returns the round's {round_id, closing}."""
+    def report(st):
+        job = _jobs.get(st.get("training_job_id") or "")
+        point = job.epochs[-1] if job and job.epochs else {}
+        body = {"round_id": st.get("round_id"), "state": st.get("state"), "message": st.get("message"),
+                "epoch": point.get("epoch"), "total_epochs": point.get("total_epochs")}
+        token = conn_ref["conn"].client().get_properties({})["token"]
+        req = urllib.request.Request(f"{BACKEND_URL}/federation/jobs/{job_id}/flower/report",
+                                     data=json.dumps(body).encode("utf-8"), method="POST",
+                                     headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.load(r)
+    return report
+
+
+def r_flower_connect(h, m, q):
+    from hospital_client.federation.flower_client import FlowerConnection
+    body = h.json_body()
+    job, dataset_id, address = body.get("job") or {}, body.get("dataset_id"), str(body.get("address") or "")
+    job_id = str(job.get("federation_job_id") or "")
+    if not MODEL_ID_RE.match(job_id) or not ARCH_RE.match(str(job.get("architecture") or "")):
+        raise ApiError(400, "Invalid federation job id or architecture.")
+    if not ADDRESS_RE.match(address):
+        raise ApiError(400, "Invalid Flower server address (expected host:port).")
+    if not DATASET_ID_RE.match(dataset_id or ""):
+        raise ApiError(400, "Invalid dataset id.")
+    token = h.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    key = (h.ws.hospital_id, job_id)
+    with _flower_lock:
+        old = _flower.get(key)
+        if old is not None and old.active():
+            raise ApiError(409, "This hospital is already connected to this job's federation server.")
+        run_training, calibrate = _flower_runner(h.ws, job, dataset_id)
+        ref = {}
+        conn = FlowerConnection(h.ws.hospital_id, job_id, address, token, run_training, calibrate,
+                                report=_backend_reporter(job_id, ref))
+        ref["conn"] = conn
+        _flower[key] = conn
+    conn.start()
+    return 202, conn.status()
+
+
+def r_flower_disconnect(h, m, q):
+    job_id = str(h.json_body().get("job_id") or "")
+    conn = _flower.get((h.ws.hospital_id, job_id))
+    if conn is None:
+        raise ApiError(404, "Not connected to this job.")
+    conn.stop()
+    return conn.status()
+
+
+def r_flower_status(h, m, q):
+    token = h.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    mine = [c for (hid, _), c in sorted(_flower.items()) if hid == h.ws.hospital_id]
+    for c in mine:
+        c.update_token(token)   # the operator's newest sign-in; tokens expire after an hour
+    return {"connections": [c.status() for c in mine]}
 
 
 ROUTES = [
@@ -1013,6 +1186,9 @@ ROUTES = [
     ("POST", re.compile(r"/api/ml/federation/submit/([A-Za-z0-9_\-]+)"), r_submit_handoff, False),
     ("POST", re.compile(r"/api/ml/datasets/([0-9a-f]{12})/set-task"), r_set_dataset_task, False),
     ("GET", re.compile(r"/api/ml/federation/task-vocabulary"), r_get_task_vocabulary, False),
+    ("POST", re.compile(r"/api/ml/federation/flower/connect"), r_flower_connect, False),
+    ("POST", re.compile(r"/api/ml/federation/flower/disconnect"), r_flower_disconnect, False),
+    ("GET", re.compile(r"/api/ml/federation/flower/status"), r_flower_status, False),
 ]
 
 

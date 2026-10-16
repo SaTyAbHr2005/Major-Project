@@ -10,7 +10,7 @@ from collections import Counter
 
 import pytest
 
-from federation.flower_sim import parse_args, partition_records, write_client_datasets
+from federation.flower_sim import calibrate_batchnorm, parse_args, partition_records, write_client_datasets
 from hospital_client.training.tests.conftest import make_preprocessed_dataset
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -56,6 +56,24 @@ def test_bad_partition_settings_are_rejected():
         partition_records(records({"A": 5}), 2, "label_skew", 0.0, 0)
 
 
+def test_batchnorm_calibration_measures_statistics_for_the_current_weights():
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+    torch.manual_seed(0)
+    model = torch.nn.Sequential(torch.nn.Linear(3, 4), torch.nn.BatchNorm1d(4))
+    model[1].running_mean.fill_(100.0)                 # statistics that belong to some other model
+    model[1].running_var.fill_(100.0)
+    weights = model[0].weight.detach().clone()
+    x = torch.randn(64, 3) * 2 + 1
+    used = calibrate_batchnorm(model, DataLoader(TensorDataset(x, torch.zeros(64)), batch_size=16), max_batches=3)
+    assert used == 3
+    with torch.no_grad():
+        h = model[0](x[:48])                            # what the BatchNorm layer saw in 3 batches
+    assert torch.allclose(model[1].running_mean, h.mean(0), atol=1e-5)
+    assert torch.allclose(model[0].weight, weights)    # forward passes only
+    assert calibrate_batchnorm(torch.nn.Linear(3, 1), [], 5) == 0   # no BatchNorm: nothing to do
+
+
 def test_client_with_no_training_images_is_an_error(tmp_path):
     data = make_preprocessed_dataset(tmp_path, {"cat": 12, "dog": 12})
     with pytest.raises(ValueError, match="no training images"):
@@ -66,6 +84,7 @@ def test_client_with_no_training_images_is_an_error(tmp_path):
     ["--strategy", "fedprox"],                    # FedProx without mu
     ["--strategy", "fedavg", "--mu", "0.1"],      # mu without FedProx
     ["--clients", "0"],
+    ["--bn-calibration-batches", "-1"],
 ])
 def test_cli_rejects_inconsistent_settings(argv):
     with pytest.raises(SystemExit):
@@ -104,7 +123,7 @@ def test_end_to_end_flower_run(tmp_path):
     for r in res["rounds"][1:]:
         assert sorted(c["client"] for c in r["clients"]) == [0, 1]
         assert all(c["proximal_mu"] == 0.01 for c in r["clients"])   # FedProx mu reached the clients
-        assert r["bytes_exchanged"] == 2 * 2 * res["model_bytes"]
+        assert r["bytes_exchanged"] == 2 * 2 * 2 * res["model_bytes"]   # train + BatchNorm calibration, 2 clients
         assert 0.0 <= r["test"]["accuracy"] <= 1.0
     # Clients together hold exactly the original training set.
     train = json.load(open(os.path.join(data, "train_manifest.json")))["records"]

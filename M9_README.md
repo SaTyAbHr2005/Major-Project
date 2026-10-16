@@ -1,7 +1,7 @@
 # Module 9 — Federated Learning and Global Model Management
 
 ## 1. Purpose and Scope
-Module 9 (M9) is the project's **central** federated learning server/orchestrator. It is not peer-to-peer. The application runs on a custom protocol in `federation/`; Flower is used for the simulation bench (`federation/flower_sim.py`, section 24.3). It connects the hospital machines (through the local ML service) with the Consortium Admin (Node.js/React + Python API adapter). M9 manages federation jobs, round lifecycles, checksum-verified updates, weighted aggregation, and versioned Global Models.
+Module 9 (M9) is the project's **central** federated learning server/orchestrator. It is not peer-to-peer. A job runs either with manual rounds (the admin opens and aggregates each round, sections 3-22) or with Flower (one Flower server per job runs every planned round automatically, section 25); Flower is also used for the simulation bench (`federation/flower_sim.py`, section 24.3). It connects the hospital machines (through the local ML service) with the Consortium Admin (Node.js/React + Python API adapter). M9 manages federation jobs, round lifecycles, checksum-verified updates, weighted aggregation, and versioned Global Models.
 
 > Updated 2026-10-09. Changes since the original write-up:
 > - rounds are opened from the admin UI;
@@ -15,6 +15,11 @@ Module 9 (M9) is the project's **central** federated learning server/orchestrato
 > Updated 2026-10-14: round plan (total rounds, early stopping, automatic next round), FedProx local term,
 > Flower simulation bench (section 24); join requests with admin approval (section 6); evaluation stops
 > when an evaluation image cannot be processed (section 15).
+
+> Updated 2026-10-16: evaluation progress on the admin screen and the held-out evaluation set (section 15);
+> the first real 3-round application run, evaluated (section 18); the Flower bench run on the real malaria data
+> (section 24.4), with BatchNorm calibration after aggregation (section 24.3); known limitations (section 20).
+> Flower in the application: Flower jobs, the admin's live Flower panel and automatic hospital training (section 25).
 
 ## 2. Architectural Overview
 The architecture separates administrative orchestration from local training:
@@ -62,6 +67,17 @@ A round strictly follows this state machine:
 - Bypasses the future-deadline guard to force immediate evaluation of current submissions.
 - **Does NOT bypass**: Minimum participant constraints, participant authorization, validation (architecture, schema, canonical provenance, duplicates), or standard expiration rules for submissions.
 - Hospital submission paths are structurally isolated from this privilege.
+
+**Deleting and archiving (added 2026-10-16)**. The admin's Delete removes a job permanently only when it has no
+history: every round is still `CREATED`, `OPEN` or `RECEIVING` and no update was accepted or used in an aggregation.
+Otherwise the job is **archived**: rounds, updates, global models and the audit trail are kept, because global models
+record the job and round they came from. An archived job is read-only. Its plan reports it finished ("This job is
+archived (read-only)."), so no round can be opened by the admin, automatically after an aggregation, or by a Flower
+server, Start federation is refused, hospitals cannot request to join, and aggregation never changes its status back
+to `COMPLETED`. Its global models can still be evaluated and promoted. The admin screen lists archived jobs in a
+separate, closed "Archived jobs" section without action buttons. Rounds follow the same rule: Delete Round removes a
+round without history and cancels one with history. Test: `federation/tests/test_round_plan.py`
+(`test_an_archived_job_is_read_only`).
 
 ## 6. Hospital Participation and Authorization
 Hospital identity relies on authenticated JWT/session context, not on untrusted client inputs.
@@ -178,6 +194,7 @@ The central platform exposes secure Node.js controllers proxying requests to the
   2. Confirming sends `force_close: true`. Module 9 still requires the minimum accepted updates.
   3. The dialog shows the aggregation in progress, then the new global model, the round status and which hospitals were notified.
 - **Hospital access:** `hospital_operator` may list jobs, join a round, submit its own update and download a round's base model. Everything else is admin-only.
+- **Federation Models screen** (`frontend/src/views/AdminFederationModelsView.jsx`): evaluate a version (with live progress, section 15), compare it with `MAIN`, promote it.
 
 ## 15. Admin Evaluation Bridge to M6/M16
 Global models are stored in M9 `FederationHandoff` format. To test global models, Admin evaluation executes a temporary structural bridge:
@@ -199,6 +216,29 @@ This isolates the permanent M9 federation format from the evaluation mechanics o
 If any evaluation image cannot be processed, the evaluation **stops with an error** listing how many images failed
 and the first few file names, and no metrics are recorded. (Before 2026-10-14 failed images were skipped silently,
 so metrics could describe only part of the evaluation set.)
+
+**Evaluation set.** The evaluator reads `evaluation_datasets/<task>/<dataset_version>/<class name>/<image>` relative
+to the repository root (git-ignored; never committed). `dataset_version` defaults to `v1`; it is the version of the
+evaluation set, not of the global model, so every global model of a task is scored on the same images and versions
+can be compared. Class folder names must match the job's `class_mapping` labels.
+
+`evaluation_datasets/Malaria/v1` (built 2026-10-15) holds 2,333 NIH malaria cell images (1,168 Parasitized,
+1,165 Uninfected): every image that neither hospital of `JOB_MAL_MNV2_CLS2_1` used for training or validation in
+any of its 3 rounds. Images were matched to the hospitals' train/validation manifests by cell name (including the
+Roboflow JPG re-exports one hospital trained on) and by SHA-256; none matched. Classes were not re-balanced.
+`eval_manifest.json` in that folder records the rule, the manifests checked and a SHA-256 per image (the evaluator
+skips it). Limitation: the hold-out is per image, not per patient; every one of the 201 patients also has other
+cells in the hospitals' training data, so the scores are likely higher than on new patients (section 20).
+
+**Progress.** An evaluation of 2,333 images takes about 4 minutes on CPU. While it runs, the evaluator writes
+`federation_artifacts/evaluation_progress/<global_model_id>.json` (`status` preparing/running/completed/failed,
+`done`, `total`, `started_at`, `images_started_at`, `updated_at`, `error`) every 25 images. The backend serves it at
+`GET /api/v1/federation/models/:global_model_id/evaluation-progress` (admin only; ids are checked so the path
+cannot leave that folder; `progress: null` when none exists). The Federation Models screen polls it every 1.5 s
+while its evaluate request is open and shows the stage, images checked, elapsed time and estimated time left; the
+version's badge reads `EVALUATION_IN_PROGRESS` meanwhile. Writing progress is best effort: on Windows the file can
+be locked while the backend reads it, so a write is retried briefly and otherwise skipped, and it can never stop
+the evaluation.
 
 ## 16. Global Model Lifecycle
 Upon successful creation, an aggregated Global Model assumes the status:
@@ -235,6 +275,29 @@ The architecture was verified utilizing a complete, canonical-provenance end-to-
 
 *(Note: Hospital IDs are historical verification inputs, not hardcoded logic.)*
 
+**Application run with a round plan (2026-10-15).** `JOB_MAL_MNV2_CLS2_1`: Malaria, MobileNetV2, 2 classes, FedAvg,
+3 planned rounds, 2 hospitals (`HOSP_999999` with the NIH PNGs, 22,046 training images; `HOSP_888888` with a Roboflow
+JPG re-export of NIH cells, 10,521 training images). Rounds 2 and 3 were opened automatically after aggregation and
+the job finished as `COMPLETED`. Evaluated on `evaluation_datasets/Malaria/v1` (2,333 images, section 15), one run each:
+
+| Global model | Accuracy | Macro F1 | Parasitized recall | Uninfected recall |
+|---|---|---|---|---|
+| v1 (round 1) | 49.9% | 0.33 | 0.0% | 100.0% |
+| v2 (round 2) | 93.8% | 0.94 | 87.8% | 99.8% |
+| v3 (round 3, promoted to `MAIN`) | 96.5% | 0.97 | 94.6% | 98.5% |
+
+v1 predicted every image as Uninfected. On 60 sampled evaluation images the same evaluation path scored
+`HOSP_999999`'s own round-1 model and v3 60/60 and `HOSP_888888`'s round-1 model 42/60 (it missed 18 of 30
+Parasitized), so this is the averaged model, not the evaluator.
+
+Cause (found 2026-10-16 with the Flower bench, section 24.3): the averaged weights were fine, but the averaged
+BatchNorm running statistics did not describe them. Re-measuring v1's BatchNorm statistics on each hospital's own
+round-1 training images (50 batches each, forward passes only, averaged by sample count) raised v1 from 49.9% to
+95.8% on the same evaluation set, without changing a weight. From round 2 the hospitals started from a shared
+trained model and stayed closer together, so the mismatch did less damage. The application protocol does not
+calibrate yet (section 20). These are single runs on a public research dataset with an image-level hold-out
+(section 15); they are not evidence of clinical performance.
+
 ## 19. Security and Integrity Guarantees Actually Implemented
 M9 strictly implements and verified the following:
 - Participant authorization via central routing expected participants.
@@ -253,9 +316,25 @@ M9 acts as the foundational lifecycle and provenance pipeline. The following cap
 - Enhanced secure communication / transport protections
 - Byzantine / malicious update detection
 - Advanced telemetry and monitoring
-- Submitting updates between machines: today the hospital sends the server the folder path of its update, so hospital and server must share a machine
+- Submitting updates between machines in manual-round jobs: the hospital sends the server the folder path of its update, so hospital and server must share a machine (Flower jobs send the update itself over Flower, section 25)
 - Module 12's hook (`federation/security_hooks.py`) currently accepts every update
 - More advanced privacy-preserving aggregation mechanisms such as FHE or SMPC, if adopted by the project
+- Hospitals cannot yet download the promoted `MAIN` model for local inference (Module 15/16 integration)
+
+Known limitations inside Module 9 (2026-10-16):
+- Manual-round jobs average BatchNorm statistics without calibrating them, so a global model can be much
+  worse than its weights (v1 of `JOB_MAL_MNV2_CLS2_1`: 49.9%, 95.8% after calibration; section 18). The Flower bench
+  (section 24.3) and Flower jobs in the application (section 25) calibrate: hospitals measure statistics for the new
+  global model on their own training images and send only the statistics.
+- The malaria evaluation set is held out per image, not per patient (section 15). A patient-level hold-out needs
+  patients removed from both hospitals' data before training, then a new run.
+- In manual-round jobs an update's `training_configuration` stores the hospital's local `dataset_dir` and
+  `output_dir` paths (they name the hospital's working folders and the operating-system user). They are not needed
+  for aggregation. Flower jobs drop path-like values before the update is stored.
+- The `EVALUATION_IN_PROGRESS` badge exists only on the admin screen that started the evaluation; reloading the page
+  during an evaluation shows `EVALUATION_PENDING` until it finishes.
+- `storage.py` reads jobs, rounds and updates by column position after `SELECT *`. This holds while columns are only
+  appended; participants, evaluations and promotion decisions use named columns.
 
 ## 21. Key Files
 The authoritative logic resides in:
@@ -295,8 +374,13 @@ The backend (`backend/src/services/notificationService.js`) stores one notificat
 
 Against the implementation plan (2026-10-14): Flower server/client workflow and multi-client simulation
 (`federation/flower_sim.py`), FedAvg, global-model exchange, sample-weighted aggregation, repeated rounds with a
-planned total or stopping rule, and FedProx are implemented and tested. Still open: running the simulation bench on
-real data and the FedAvg vs FedProx experiments (Module 20).
+planned total or stopping rule, and FedProx are implemented and tested. The simulation bench has run on the real
+malaria data (section 24.4), and a real 3-round application job was run and evaluated (section 18). Since
+2026-10-16 the application can also run a job through Flower (section 25), with BatchNorm calibration; this is
+verified by automated tests, including an end-to-end run with two hospital services, and by a real 2-round Flower
+job on the malaria data in the application (section 25.8). Open inside Module 9: BatchNorm calibration for
+manual-round jobs (section 20).
+The FedAvg vs FedProx experiments belong to Module 20.
 
 M9 is the completed federation lifecycle and aggregation foundation for the current project scope. Privacy-enhancing mechanisms, enhanced secure-transport protections, Byzantine/malicious-update detection, and advanced telemetry remain outside the current M9 implementation and are reserved for subsequent modules.
 
@@ -353,6 +437,19 @@ python -m federation.flower_sim --dataset <Module 5 output dir> --output <result
 - Clients train with the unchanged Module 7 Trainer from the round's global model (checksum-verified
   base-model path), one at a time (shared lock) so a 4 GB GPU is enough.
 - The server evaluates the global model on the Module 5 test split after every round (round 0 = start model).
+- BatchNorm calibration (added 2026-10-16, bench version 1.1): after every aggregation each client runs the
+  averaged model forward over up to `--bn-calibration-batches` (default 50) batches of its own training images to
+  re-measure BatchNorm running statistics; the server averages them by sample count. Weights are not changed and
+  no images leave the client. Each federated round is then two Flower rounds (train, calibrate), which doubles the
+  parameters exchanged. `--bn-calibration-batches 0` gives plain FedAvg/FedProx averaging.
+
+  Why: averaging also averages each client's BatchNorm statistics, which describe that client's weights, not the
+  averaged ones. In the first malaria run (MobileNetV2 from scratch, 3 IID clients, 1 local epoch) every client
+  model reached 95-96% test accuracy on its own, but the averaged model predicted Uninfected for every image (51.2%)
+  in rounds 1 and 2. On three such client models, scored on a fixed sample of 640 test images: plain average 48.4%; average with statistics measured from
+  each test batch 93.4% (upper bound, not usable since it uses test data); average with statistics calibrated on
+  the clients' training images 93.1%. Averaging three copies of one client gave that client's accuracy unchanged,
+  so the averaging itself was correct.
 - Output: `results.json` (configuration incl. seed, partition class counts, per-round test metrics,
   client metrics, round durations, bytes exchanged) and `rounds.csv`.
 - Limitations: records are split individually (patient groups are not kept together); Flower's FedAvg
@@ -360,9 +457,157 @@ python -m federation.flower_sim --dataset <Module 5 output dir> --output <result
   fixed number of rounds (no early stopping in the bench); `start_server`/`start_client` are deprecated
   since Flower 1.13 but need no extra services.
 
-The application protocol (sections 3-22) is unchanged in its trust model: hospitals still submit
-through the backend, and the cross-machine submission limitation in section 20 still applies.
-Flower is used for the simulation bench and experiments, not for the hospital desktop flow.
+### 24.4 Run on the real malaria data (2026-10-16)
+```
+python -m federation.flower_sim --dataset <malaria Module 5 output, patient-level split> --output <results dir> \
+    --clients 3 --rounds 5 --partition iid --strategy fedavg --architecture mobilenet_v2 \
+    --epochs 1 --batch-size 32 --device cuda --seed 42        # lr 1e-3 (Adam), 50 calibration batches
+```
+NIH malaria cells, Module 5 split by patient (filename prefix), Flower 1.30.0, bench 1.1, RTX 3050 Laptop (4 GB).
+Each client got about 7,620 training images (Parasitized/Uninfected roughly 52/48) and about 630 validation images.
+Test split: 2,799 images, never used for training or calibration. MobileNetV2 from scratch (no pretrained weights).
 
-Tests: `federation/tests/test_round_plan.py` (23), `federation/tests/test_participation.py` (17), `federation/tests/test_flower_sim.py` (11, including a failing-client run and a
-real 2-client FedProx Flower run), `hospital_client/training/tests/test_fedprox.py` (8).
+| Round | Test accuracy | Test F1 | Parasitized recall | Uninfected recall | Seconds |
+|---|---|---|---|---|---|
+| 0 (untrained) | 48.8% | 0.33 | 100% | 0% | 11 |
+| 1 | 94.2% | 0.94 | 94.0% | 94.4% | 309 |
+| 2 | 96.8% | 0.97 | 96.3% | 97.2% | 263 |
+| 3 | 96.7% | 0.97 | 97.2% | 96.2% | 252 |
+| 4 | 97.0% | 0.97 | 96.8% | 97.2% | 310 |
+| 5 | 97.2% | 0.97 | 97.2% | 97.2% | 253 |
+
+Round 5 confusion matrix (rows true, columns predicted; Parasitized, Uninfected): [[1327, 38], [40, 1394]].
+About 108.5 MB of parameters were exchanged per round (9.04 MB model, 3 clients, train + calibration, both
+directions); 23.4 minutes in total. One run, one seed, IID split: it shows the Flower workflow works end to end on
+real data. FedAvg vs FedProx and IID vs label skew comparisons belong to Module 20. Results (`results.json`,
+`rounds.csv`) are kept outside the repository with the other malaria outputs.
+
+Jobs with manual rounds (sections 3-22) are unchanged: hospitals still submit through the backend, and the
+cross-machine submission limitation in section 20 still applies to them. Jobs created with the Flower protocol run
+through the application's own Flower server (section 25).
+
+Tests: `federation/tests/test_round_plan.py` (23), `federation/tests/test_participation.py` (18, including the
+evaluation progress file on failure and a locked progress file), `federation/tests/test_flower_sim.py` (13, including BatchNorm calibration,
+a failing-client run and a real 2-client FedProx Flower run), `hospital_client/training/tests/test_fedprox.py` (8).
+All federation tests: 85 passed; backend: 173 passed, including the evaluation-progress route (2026-10-16).
+
+## 25. Flower in the Application (added 2026-10-16)
+
+A federation job can run its rounds through Flower instead of the admin opening and aggregating each round by hand.
+The admin chooses "How rounds run" when creating the job (`aggregation_configuration.protocol`: `"flower"`, the
+default for new jobs in the UI, or `"manual"`). Flower jobs need `total_rounds` and always continue automatically.
+Existing manual-round jobs behave as before.
+
+### 25.1 What runs where
+- **Flower server** (`federation/flower_app/`, started by the backend as `python -m federation.flower_app --job-id ...`
+  when the admin presses **Start federation**): one process per job. Its strategy does not replace Module 9; it
+  drives it. For every federated round it opens the Module 9 round (or reuses one that is still open), waits for
+  approved hospitals, sends the round's base model, takes each hospital's update through the same intake validation
+  as a manual round (`IntakeManager`, checksum, base-model provenance, deadline), closes the round and aggregates with
+  the Module 9 aggregator. It then runs a BatchNorm calibration step and creates the versioned Global Model.
+  Each federated round is two Flower rounds: train, then calibrate.
+- **Hospital Flower client** (`hospital_client/federation/flower_client.py`): a thread inside the hospital's local ML
+  service. The hospital app connects it automatically for approved Flower jobs while the app is open and the
+  hospital is signed in. Each train step starts the same Module 8 training job a manual round starts
+  (`build_federated_training`), so the Training Monitor shows it as usual. The base model received over Flower is
+  saved as the job's base checkpoint after its checksum is checked.
+- **Backend** (`backend/src/services/flowerService.js`): starts and stops the server, reads its status file, turns
+  its events into round notifications and gives each UI its view of the status.
+
+Raw images stay at the hospital. Over Flower the hospital sends model parameters, the update's metadata (sample
+counts, metrics, training configuration without local paths) and, in the calibration step, BatchNorm running
+statistics only.
+
+### 25.2 When a round starts and ends
+- A round starts when at least the job's minimum number of approved hospitals are connected and verified. If that
+  does not happen before the round's deadline, the round fails with `INSUFFICIENT_PARTICIPANTS` and the run ends.
+- The round is aggregated as soon as every selected hospital has sent its update.
+- At the deadline, whatever has arrived is aggregated (collection closes `min(120 s, 10% of the round)` early so
+  updates in flight still reach Module 9 before its deadline). Fewer accepted updates than the minimum fails the round.
+- **Aggregate now** (admin) is enabled once the minimum number of hospitals report their update sent. It writes
+  `federation_artifacts/flower/<job>/close_round`; hospitals still training see `closing` and cancel.
+- After aggregation the hospitals recalibrate BatchNorm statistics for the averaged weights on up to 50 training
+  batches (forward passes only); the server averages them by sample count and saves them into the Global Model.
+
+### 25.3 Identity
+The client sends its `hospital_id` and the operator's session token through Flower's `get_properties`. The server
+checks the token against the backend (`GET /auth/me`, role `hospital_operator`, matching `hospital_id`, answers cached
+60 s) and checks that the hospital is approved for the job. Each update is checked again before intake. Tokens are not
+written to the status file, API responses or logs.
+
+### 25.4 Routes and status
+Backend (`/api/v1/federation`):
+- `POST /jobs/:job_id/flower/start`, `POST /jobs/:job_id/flower/stop`, `POST /jobs/:job_id/flower/aggregate-now` (admin).
+- `GET /jobs/:job_id/flower/status`: admins get the full status (every hospital, events, updates sent); a hospital
+  gets the job status and its own entry only.
+- `POST /jobs/:job_id/flower/report` (hospital): the hospital's state and training progress; returns `closing`.
+- `GET /jobs` adds a `flower` summary (state, Flower round, phase, address, `closing`, `stale`, `running`) to Flower jobs.
+
+Hospital local ML service: `POST /api/ml/federation/flower/connect`, `POST .../disconnect`, `GET .../status`.
+
+The server writes `federation_artifacts/flower/<job>/status.json` (atomic replace): state, federated round and
+phase, each hospital's step (`connected`, `training`, `sent`, `calibrating`, `done`, `missed`, `rejected`, `failed`) and the
+last 200 events. A status not updated for 30 s while the run is not finished is shown as stale.
+
+### 25.5 What the UIs show
+- Admin, Federated Training: **Start federation** on a Flower job and a live panel with the server state, the
+  current round and step, each hospital's step and training epoch, recent events, **Aggregate now** (with the reason
+  when it is disabled) and **Stop**.
+- Hospital, Federation: the dataset the job trains with (chosen when the join request was sent) and a step strip
+  (connected, model received, training, sending update, waiting for other hospitals, calibrating, round done).
+- Hospital, Training Monitor: the same step strip above the usual monitor, which follows the round's training job.
+
+### 25.6 Limitations
+- Uses Flower's `start_server`/`start_client` (deprecated since Flower 1.13; no SuperLink/SuperNode).
+- No TLS on the Flower connection (`insecure=True`) until Module 11. The token travels in clear text on that link.
+- On one machine with one GPU, hospitals train one after another (the training lock is machine-wide), so a round
+  takes as long as all hospitals' training together.
+- **Stop** ends the Flower server but leaves the current Module 9 round open; **Start federation** continues it.
+  The server process belongs to the backend: restarting the backend ends it (the panel then shows it as stale).
+- A hospital trains only while its app is open and signed in.
+- Flower hands the server a round's updates only when every selected hospital has finished, so until then the
+  admin panel learns that a hospital sent its update from the hospital's own report (`POST .../flower/report`),
+  not from the server.
+- One real application run so far (section 25.8): one seed, two hospitals on one machine.
+
+### 25.7 Tests
+- `federation/tests/test_flower_app_engine.py` (5): path stripping, handoff rebuild and checksum, BatchNorm averaging,
+  Global Model replacement.
+- `federation/tests/test_flower_app.py` (4): two full rounds with real Flower clients, too few hospitals, Aggregate
+  now, identity rejected.
+- `hospital_client/federation/tests/test_flower_client.py` (7, including reports continuing after training so the
+  backend hears the update was sent) and three Flower route tests in
+  `hospital_client/local_api/tests/test_server.py`.
+- `hospital_client/local_api/tests/test_flower_integration.py` (1): a real Flower server and two hospital local ML
+  services on one machine, real Module 8 training on synthetic images, one round to a Global Model (about 5 minutes).
+- `backend/tests/api/federation.test.js`: 8 Flower tests (role checks, start refusals, start/stop, status per role,
+  stale status, reports and Aggregate now, the job-list summary, round notifications).
+
+### 25.8 Run on the real malaria data (2026-10-16)
+Job `JOB_MAL_RES18_CLS2_V2`: Flower protocol, ResNet-18, 2 classes (Parasitized, Uninfected), FedAvg, 2 planned rounds,
+24 h deadline per round, 10 local epochs. Two hospitals on one machine (RTX 3050 Laptop, 4 GB), both approved after
+their own eligibility checks: NeoPulse Hospital (`HOSP_999999`, 22,046 training images) and BreachCandy Hospital
+(`HOSP_888888`, 10,521 training images). The admin pressed Start federation once; everything after that ran by itself.
+
+| Round | Started | Aggregated | Global model |
+|---|---|---|---|
+| 1 | 14:19 UTC (both hospitals connected 14:22) | 15:07, 2 updates | v2 |
+| 2 | 15:07 | 15:49, 2 updates | v3 |
+
+Each round took about 41-48 minutes because the hospitals trained one after another on the shared GPU. Each round
+ended as soon as both updates had arrived, well inside its 24 h deadline.
+
+Evaluation on the held-out malaria set (`evaluation_datasets/Malaria/v1`, 2,333 images, held out per image; section 15):
+
+| Model | Accuracy | F1 | Parasitized recall (missed of 1,168) | Uninfected recall (false alarms of 1,165) |
+|---|---|---|---|---|
+| v2 (round 1) | 96.10% | 0.961 | 95.9% (48) | 96.3% (43) |
+| v3 (round 2) | 96.14% | 0.961 | 96.5% (41) | 95.8% (49) |
+
+Round 2 matched round 1 (one more correct image out of 2,333): the model had levelled off after one round on this
+data. One run, one seed; these are experimental results, not clinical performance.
+
+Found during the run and fixed: a hospital stopped reporting its step once its training ended, so the admin panel
+kept showing it as training (epoch 10 of 10), "updates sent" stayed at 0 and Aggregate now could not be enabled
+(the round itself aggregated correctly). Hospitals now keep reporting until the round moves on, and the panel shows
+"Update sent". A hospital queued behind another training on the same GPU now says so instead of "Training".

@@ -438,3 +438,77 @@ def test_inspect_passes_the_metadata_label_source_to_module_4(api, tmp_path, mon
     assert call(f"{api}/datasets/inspect", method="POST", body={"path": str(tmp_path / "images"), "label_source": bad})[0] == 400
     assert call(f"{api}/datasets/inspect", method="POST", body={"path": str(csv), "label_source": spec})[0] == 400
     assert len(started) == 1
+
+
+# ── Flower jobs ──────────────────────────────────────────────────────────────────────────
+
+FLOWER_JOB = {"federation_job_id": "JOB1", "architecture": "mobilenet_v3_small", "num_classes": 2,
+              "class_mapping": {"a": 0, "b": 1}, "training_requirements": {"epochs": 2}, "rounds": []}
+ROUND = {"round_id": "JOB1_R1", "base_model_id": "SEED_JOB1", "base_model_version": 1, "base_model_checksum": "abc"}
+
+
+def _fake_dataset(tmp_path, monkeypatch):
+    import hospital_client.federation.manifest_filter as mf
+    monkeypatch.setattr(server, "_require_preprocessed", lambda ws, dataset_id: str(tmp_path))
+    monkeypatch.setattr(mf, "create_job_manifests", lambda **kw: (str(tmp_path), {"train": 10, "val": 5, "test": 5}))
+    monkeypatch.setattr(server, "dataset_dir", lambda ws, dataset_id: str(tmp_path))
+    (tmp_path / "source.json").write_text(json.dumps({"name": "cells"}))
+
+
+def test_manual_and_flower_rounds_build_the_same_training_command(api, tmp_path, monkeypatch):
+    _fake_dataset(tmp_path, monkeypatch)
+    started = []
+
+    class Handle:
+        def to_dict(self): return {"job_id": "abc", "status": "running"}
+
+    monkeypatch.setattr(server, "start_job", lambda kind, cmd, *a, **kw: started.append(cmd) or Handle())
+    monkeypatch.setattr(server, "_ensure_base_model", lambda *a: None)
+    job = {**FLOWER_JOB, "rounds": [ROUND]}
+    assert call(f"{api}/federation/participate", method="POST", body={"job": job, "dataset_id": "0123456789ab", "round_id": "JOB1_R1"})[0] == 202
+    cmd, meta, model_id, run_dir = server.build_federated_training(server.Workspace("HOSP_1"), job, "0123456789ab", ROUND)
+
+    def norm(c):
+        return [("MODEL" if a.startswith("FED_JOB1_") else a) for a in c]
+    assert norm(cmd) == norm(started[0])
+    assert "--canonical-base-model-checksum" in cmd and "--epochs" in cmd and meta["round_id"] == "JOB1_R1"
+
+
+def test_model_received_over_flower_is_stored_where_the_trainer_reads_it(tmp_path):
+    from types import SimpleNamespace
+    from hospital_client.model_management.config import ModelConfig
+    from hospital_client.model_management.parameters import get_parameters
+    from hospital_client.model_management.registry import build_model
+    from hospital_client.model_management.store import ModelStore
+    from hospital_client.training.federation import _compute_parameters_checksum
+
+    ws = SimpleNamespace(trained=str(tmp_path / "trained"))
+    params = get_parameters(build_model(ModelConfig(architecture="mobilenet_v3_small", num_classes=2, input_size=(224, 224))))
+    good = {**ROUND, "base_model_checksum": _compute_parameters_checksum(params)}
+    server._save_received_base_model(ws, FLOWER_JOB, params, good)
+    loaded, _ = ModelStore(str(tmp_path / "trained" / "mobilenet_v3_small" / "models")).load_checkpoint("SEED_JOB1", 1)
+    assert _compute_parameters_checksum(get_parameters(loaded)) == good["base_model_checksum"]
+
+    with pytest.raises(server.ApiError, match="checksum"):
+        server._save_received_base_model(ws, FLOWER_JOB, params, {**ROUND, "base_model_id": "OTHER", "base_model_checksum": "wrong"})
+    assert not (tmp_path / "trained" / "mobilenet_v3_small" / "models" / "OTHER").exists()
+
+
+def test_flower_connect_status_and_disconnect(api, monkeypatch):
+    from hospital_client.federation.flower_client import FlowerConnection
+    monkeypatch.setattr(FlowerConnection, "start", lambda self: self._set(state="waiting"))
+    body = {"job": FLOWER_JOB, "dataset_id": "0123456789ab", "address": "127.0.0.1:8090"}
+
+    assert call(f"{api}/federation/flower/connect", method="POST", body={**body, "address": "evil host"})[0] == 400
+    status, _, st = call(f"{api}/federation/flower/connect", method="POST", body=body)
+    assert status == 202 and st["job_id"] == "JOB1" and st["state"] == "waiting"
+    assert call(f"{api}/federation/flower/connect", method="POST", body=body)[0] == 409       # already connected
+
+    status, _, res = call(f"{api}/federation/flower/status")
+    assert status == 200 and [c["job_id"] for c in res["connections"]] == ["JOB1"] and "good" not in json.dumps(res)
+    assert server._flower[("HOSP_1", "JOB1")].client().get_properties({})["token"] == "good"   # refreshed from the poll
+    assert call(f"{api}/federation/flower/status", token="other")[2]["connections"] == []      # another hospital
+
+    assert call(f"{api}/federation/flower/disconnect", method="POST", body={"job_id": "JOB1"})[0] == 200
+    assert call(f"{api}/federation/flower/status")[2]["connections"][0]["state"] == "disconnected"
+    assert call(f"{api}/federation/flower/connect", method="POST", body=body)[0] == 202       # can reconnect

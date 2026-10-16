@@ -17,7 +17,12 @@ const {
   registerParticipant,
   submitUpdate,
   requestParticipation,
-  decideParticipation
+  decideParticipation,
+  startFlower,
+  stopFlower,
+  getFlowerStatus,
+  reportFlower,
+  aggregateFlowerNow
 } = require('../controllers/federationController');
 
 const { requireAuth } = require('../authentication/middleware/authMiddleware');
@@ -31,6 +36,7 @@ router.use(requireAuth);
 // Admin and Hospital Operator shared endpoints
 router.get('/jobs', requireRole(ROLES.ADMIN, ROLES.HOSPITAL_OPERATOR), listJobs);
 router.get('/rounds/:round_id/base-model/:file', requireRole(ROLES.ADMIN, ROLES.HOSPITAL_OPERATOR), downloadBaseModel);
+router.get('/jobs/:job_id/flower/status', requireRole(ROLES.ADMIN, ROLES.HOSPITAL_OPERATOR), getFlowerStatus);
 
 // Admin-only endpoints
 router.get('/architectures', requireRole(ROLES.ADMIN), getArchitectures);
@@ -45,11 +51,15 @@ router.post('/models/evaluate', requireRole(ROLES.ADMIN), evaluateModel);
 router.get('/models/:global_model_id/evaluation-progress', requireRole(ROLES.ADMIN), getEvaluationProgress);
 router.post('/models/promote', requireRole(ROLES.ADMIN), promoteModel);
 router.post('/jobs/:job_id/participants/:hospital_id/decision', requireRole(ROLES.ADMIN), decideParticipation);
+router.post('/jobs/:job_id/flower/start', requireRole(ROLES.ADMIN), startFlower);
+router.post('/jobs/:job_id/flower/stop', requireRole(ROLES.ADMIN), stopFlower);
+router.post('/jobs/:job_id/flower/aggregate-now', requireRole(ROLES.ADMIN), aggregateFlowerNow);
 
 // Hospital Operator endpoints
 router.get('/hospital-status', requireRole(ROLES.HOSPITAL_OPERATOR), getHospitalStatus);
 router.post('/jobs/:job_id/participation-request', requireRole(ROLES.HOSPITAL_OPERATOR), requestParticipation);
 router.post('/jobs/:job_id/rounds/:round_id/participate', requireRole(ROLES.HOSPITAL_OPERATOR), registerParticipant);
 router.post('/jobs/:job_id/rounds/:round_id/submit', requireRole(ROLES.HOSPITAL_OPERATOR), submitUpdate);
+router.post('/jobs/:job_id/flower/report', requireRole(ROLES.HOSPITAL_OPERATOR), reportFlower);
 
 module.exports = router;

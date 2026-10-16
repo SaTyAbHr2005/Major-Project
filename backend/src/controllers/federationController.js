@@ -68,6 +68,15 @@ exports.listJobs = async (req, res) => {
         delete j.participants;
       });
     }
+    // Flower jobs carry their server's run status (hospital apps connect when it is running).
+    (result.jobs || []).forEach((j) => {
+      if (j.plan?.protocol !== 'flower') return;
+      const st = flower.readStatus(j.federation_job_id);
+      j.flower = {
+        state: st.state, fl_round: st.fl_round ?? null, total_rounds: st.total_rounds ?? null, round_id: st.round_id ?? null,
+        phase: st.phase ?? null, address: st.address ?? null, closing: Boolean(st.closing), stale: Boolean(st.stale), running: st.running,
+      };
+    });
     // Admins see which hospital each participant id is; hospitals only get the ids.
     if (req.user.role === 'admin') {
       const ids = [...new Set((result.jobs || []).flatMap((j) => [
@@ -311,5 +320,54 @@ exports.getHospitalStatus = async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ── Flower jobs (protocol "flower"): the Flower server runs the planned rounds; see services/flowerService.js ──
+const flower = require('../services/flowerService');
+
+const flowerError = (res, err) => res.status(err.status || 500).json({ success: false, error: err.message });
+
+exports.startFlower = async (req, res) => {
+  try {
+    const { jobs = [] } = await callPythonAdapter({ action: 'list_jobs' });
+    const job = jobs.find((j) => j.federation_job_id === req.params.job_id);
+    if (!job) return res.status(404).json({ success: false, error: 'Job not found.' });
+    res.status(202).json({ success: true, ...(await flower.start(job)) });
+  } catch (err) {
+    flowerError(res, err);
+  }
+};
+
+exports.stopFlower = (req, res) => {
+  try {
+    flower.stop(req.params.job_id);
+    res.json({ success: true, status: flower.status(req.params.job_id, req.user) });
+  } catch (err) {
+    flowerError(res, err);
+  }
+};
+
+exports.getFlowerStatus = (req, res) => {
+  try {
+    res.json({ success: true, status: flower.status(req.params.job_id, req.user) });
+  } catch (err) {
+    flowerError(res, err);
+  }
+};
+
+exports.reportFlower = (req, res) => {
+  try {
+    res.json({ success: true, ...flower.report(req.params.job_id, req.user.hospital_id, req.body || {}) });
+  } catch (err) {
+    flowerError(res, err);
+  }
+};
+
+exports.aggregateFlowerNow = (req, res) => {
+  try {
+    res.json({ success: true, ...flower.aggregateNow(req.params.job_id) });
+  } catch (err) {
+    flowerError(res, err);
   }
 };

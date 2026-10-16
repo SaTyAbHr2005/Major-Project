@@ -20,6 +20,11 @@ How it runs
 - After every round the server evaluates the global model on the Module 5 *test* manifest
   (round 0 = the untrained starting model). Test data is never used for training or selection.
 - Clients train one at a time (a shared lock), so several clients fit on a small GPU.
+- BatchNorm calibration (default 50 batches per client, `--bn-calibration-batches 0` = off): after every
+  aggregation each client runs the averaged model forward over part of its own training images to re-measure
+  BatchNorm statistics, and the server averages them by sample count. Without it the averaged statistics belong
+  to no model and, on the malaria data, the global model predicted one class for every image. Each federated
+  round is then two Flower rounds (train, calibrate); results and logs count federated rounds.
 
 Results: <output>/results.json (full configuration, partition class counts, per-round metrics,
 client metrics, durations, bytes exchanged) and <output>/rounds.csv.
@@ -46,7 +51,9 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-SIM_VERSION = "1.0"
+from hospital_client.federation.bn_calibration import calibrate_batchnorm
+
+SIM_VERSION = "1.1"  # 1.1: BatchNorm calibration after every aggregation
 PARTITIONS = ("iid", "label_skew")
 STRATEGIES = ("fedavg", "fedprox")
 
@@ -173,7 +180,9 @@ def run_client(k: int, address: str, settings: Dict[str, Any], client_dir: str, 
 
     class HospitalClient(fl.client.NumPyClient):
         def fit(self, parameters, config):
-            rnd = int(config["server_round"])
+            if config.get("phase") == "calibrate":
+                return self.calibrate(parameters)
+            rnd = int(config["fl_round"])
             mu = float(config.get("proximal_mu", 0.0))  # set by Flower's FedProx strategy
             cfg = _model_config(settings)
             work = os.path.join(settings["output_dir"], "work", f"client_{k}", f"round_{rnd}")
@@ -203,6 +212,24 @@ def run_client(k: int, address: str, settings: Dict[str, Any], client_dir: str, 
                        "train_accuracy": result.training_metrics.get("accuracy", 0.0),
                        "val_accuracy": (result.validation_metrics or {}).get("accuracy", -1.0), "proximal_mu": mu}
             return params, n_train, metrics
+
+        def calibrate(self, parameters):
+            """BatchNorm statistics of the aggregated model on this client's training images (no training)."""
+            import torch
+            from torch.utils.data import DataLoader
+            from hospital_client.model_management.device import resolve_device
+            from hospital_client.training.dataset import ManifestImageDataset, load_manifest
+            cfg = _model_config(settings)
+            model = build_model(cfg)
+            set_parameters(model, parameters)
+            model.to(resolve_device(settings["device"]))
+            train = load_manifest(os.path.join(client_dir, "train_manifest.json"))
+            loader = DataLoader(ManifestImageDataset(train, settings["class_mapping"], cfg.color_mode, tuple(cfg.input_size)),
+                                batch_size=settings["batch_size"], shuffle=True,
+                                generator=torch.Generator().manual_seed(settings["seed"] + k))
+            with lock:
+                used = calibrate_batchnorm(model, loader, settings["bn_calibration_batches"])
+            return get_parameters(model), n_train, {"client": k, "phase": "calibrate", "batches": used}
 
         def evaluate(self, parameters, config):  # evaluation is server-side on the test split
             return 0.0, 1, {}
@@ -251,26 +278,38 @@ def run_simulation(settings: Dict[str, Any]) -> Dict[str, Any]:
     client_metrics: Dict[int, List[Dict[str, Any]]] = {}
     clock = {"t": time.time()}
 
+    calibrating = settings["bn_calibration_batches"] > 0
+    # With calibration every federated round is two Flower rounds: train (odd), then calibrate (even).
+    exchanges = 2 if calibrating else 1
+
     def evaluate_fn(server_round, parameters, config):
+        if calibrating and server_round % 2:
+            return None  # trained and averaged, BatchNorm statistics not yet calibrated
+        fl_round = server_round // exchanges
         m = evaluate_parameters(parameters, settings)
         now = time.time()
-        rounds.append({"round": server_round, "test": m, "seconds": round(now - clock["t"], 2),
-                       "bytes_exchanged": 0 if server_round == 0 else 2 * model_bytes * settings["clients"],
-                       "clients": client_metrics.get(server_round, [])})
+        rounds.append({"round": fl_round, "test": m, "seconds": round(now - clock["t"], 2),
+                       "bytes_exchanged": 0 if fl_round == 0 else 2 * exchanges * model_bytes * settings["clients"],
+                       "clients": client_metrics.get(fl_round, [])})
         clock["t"] = now
-        print(f"[round {server_round}/{settings['rounds']}] test_accuracy={m['accuracy']:.4f} test_f1={m['f1']:.4f}", flush=True)
+        print(f"[round {fl_round}/{settings['rounds']}] test_accuracy={m['accuracy']:.4f} test_f1={m['f1']:.4f}", flush=True)
         return float(m["loss"]), {"accuracy": float(m["accuracy"]), "f1": float(m["f1"])}
 
     def fit_metrics(results):
-        # Called right before evaluate_fn of the same round.
-        client_metrics[len(rounds)] = sorted((dict(m, num_examples=n) for n, m in results), key=lambda m: m["client"])
+        # Training results of federated round len(rounds); calibration results are not training metrics.
+        if all(m.get("phase") != "calibrate" for _, m in results):
+            client_metrics[len(rounds)] = sorted((dict(m, num_examples=n) for n, m in results), key=lambda m: m["client"])
         return {}
+
+    def fit_config(server_round):
+        phase = "calibrate" if calibrating and server_round % 2 == 0 else "train"
+        return {"server_round": server_round, "fl_round": (server_round + exchanges - 1) // exchanges, "phase": phase}
 
     common = dict(
         fraction_fit=1.0, fraction_evaluate=0.0, min_fit_clients=settings["clients"],
         min_available_clients=settings["clients"], min_evaluate_clients=0,
         initial_parameters=fl.common.ndarrays_to_parameters(initial), evaluate_fn=evaluate_fn,
-        on_fit_config_fn=lambda rnd: {"server_round": rnd}, fit_metrics_aggregation_fn=fit_metrics,
+        on_fit_config_fn=fit_config, fit_metrics_aggregation_fn=fit_metrics,
     )
     strategy = (fl.server.strategy.FedProx(proximal_mu=settings["mu"], **common) if settings["strategy"] == "fedprox"
                 else fl.server.strategy.FedAvg(**common))
@@ -286,7 +325,7 @@ def run_simulation(settings: Dict[str, Any]) -> Dict[str, Any]:
     done = threading.Event()
     threading.Thread(target=_watch_clients, args=(procs, done), daemon=True).start()
     try:
-        fl.server.start_server(server_address=address, config=fl.server.ServerConfig(num_rounds=settings["rounds"]), strategy=strategy)
+        fl.server.start_server(server_address=address, config=fl.server.ServerConfig(num_rounds=settings["rounds"] * exchanges), strategy=strategy)
     finally:
         done.set()
         for p in procs:
@@ -336,9 +375,13 @@ def parse_args(argv: Optional[List[str]] = None) -> Dict[str, Any]:
     p.add_argument("--lr", dest="learning_rate", type=float, default=1e-3)
     p.add_argument("--device", choices=("cpu", "cuda"), default="cpu")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--bn-calibration-batches", dest="bn_calibration_batches", type=int, default=50,
+                   help="Batches per client used to re-measure BatchNorm statistics after each aggregation (0 = off)")
     s = vars(p.parse_args(argv))
     if s["clients"] < 1 or s["rounds"] < 1 or s["epochs"] < 1:
         p.error("--clients, --rounds and --epochs must be >= 1")
+    if s["bn_calibration_batches"] < 0:
+        p.error("--bn-calibration-batches must be >= 0")
     if s["strategy"] == "fedprox" and not s["mu"] > 0:
         p.error("--strategy fedprox needs --mu > 0")
     if s["strategy"] == "fedavg" and s["mu"]:

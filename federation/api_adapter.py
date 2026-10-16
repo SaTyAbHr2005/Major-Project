@@ -161,7 +161,11 @@ def job_plan(storage, job):
             done = sorted((e for e in evals if e["global_model_id"] == m["global_model_id"]), key=lambda e: e.get("completed_at") or "")
             if done:
                 scores.append((numbers[m["round_id"]], float(done[-1][metric])))
-    return plan_status(agg, rounds, scores)
+    plan = plan_status(agg, rounds, scores)
+    # An archived job is a read-only record: it opens no more rounds (admin, automatic or Flower).
+    if job.get("status") == JobStatus.ARCHIVED.value:
+        plan.update(finished=True, next_round_number=None, reason="This job is archived (read-only).")
+    return plan
 
 
 def job_participants(storage, job_id):
@@ -246,8 +250,9 @@ def after_aggregation(storage, events, job_id, global_model_id, eval_datasets_di
     plan = job_plan(storage, job_dict)
     job = storage.get_job(job_id)
     if plan["finished"]:
-        job.status = JobStatus.COMPLETED
-        storage.save_job(job)
+        if job.status != JobStatus.ARCHIVED:   # archived stays archived
+            job.status = JobStatus.COMPLETED
+            storage.save_job(job)
         return plan, None, warnings
     if not plan["auto_continue"] or plan["next_round_number"] is None:
         return plan, None, warnings
