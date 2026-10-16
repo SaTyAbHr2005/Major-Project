@@ -61,7 +61,7 @@ Where they disagree with the module docs, the module docs and the code are curre
 | 6 | Model management | Implemented | 8 architectures, versioned safetensors checkpoints, integrity checks |
 | 7 | Local training | Implemented | One PyTorch trainer for every architecture, metrics, plots, federation handoff |
 | 8 | Resource-aware training | Implemented | Hardware detection, per-model memory/time estimates with a real dry run, recommendations, OOM retry |
-| 9 | Federated learning | Implemented (custom protocol for the app + Flower simulation bench) | Jobs, join requests with admin approval (hospital sends its local eligibility summary), rounds, base-model distribution, update validation, weighted FedAvg, FedProx, round plan (total rounds, early stopping, automatic next round), global models, evaluation, promotion; `python -m federation.flower_sim` runs Flower with N simulated hospitals (IID / label-skew) |
+| 9 | Federated learning | Implemented (jobs run through Flower in the app; manual rounds and a Flower simulation bench also available) | Jobs, join requests with admin approval (hospital sends its local eligibility summary), rounds, base-model distribution, update validation, weighted FedAvg, FedProx, round plan (total rounds, early stopping, automatic next round), global models, evaluation, promotion; Start federation runs the job through a Flower server per job (`federation/flower_app`) with live status on the admin and hospital screens; `python -m federation.flower_sim` runs Flower with N simulated hospitals (IID / label-skew) |
 | 10 | Differential privacy | Not implemented | |
 | 11 | Secure communication | Not implemented | Local services use plain HTTP on localhost; no TLS/mTLS |
 | 12 | Byzantine/malicious update detection | Not implemented | Module 9 has a hook that currently accepts every update |
@@ -299,8 +299,10 @@ Details: [module16_readme.md](module16_readme.md).
 
 ## 6. Federated learning (Module 9), short version
 
-It is a **central** federated learning server (not peer-to-peer), implemented in this project
-(`federation/`), not with Flower.
+It is a **central** federated learning server (not peer-to-peer). Job, round and model records live in
+`federation/`. Rounds run in one of two ways: **Start federation** runs them through a Flower server
+per job (`federation/flower_app`; the steps below then happen automatically), or the admin opens and
+aggregates each round by hand.
 
 1. **Admin creates a job:** task (e.g. "Skin Cancer"), architecture, class mapping, minimum participants,
    and optionally a total number of rounds (the next round then opens by itself after each aggregation).
