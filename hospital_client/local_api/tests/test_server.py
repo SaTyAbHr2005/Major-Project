@@ -30,11 +30,13 @@ def api(tmp_path, monkeypatch):
         return tokens[token]
 
     monkeypatch.setattr(server, "verify_token", fake_verify)
+    server._flower.clear()
     httpd = server.make_server(0)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{httpd.server_address[1]}/api/ml"
     httpd.shutdown()
     httpd.server_close()
+    server._flower.clear()
 
 
 def call(url, method="GET", body=None, token="good", origin=ORIGIN, ctype="application/json", raw=None):

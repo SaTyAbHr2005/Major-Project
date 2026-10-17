@@ -58,6 +58,13 @@ def main():
     train_parser.add_argument("--architecture-subdir", action="store_true",
                               help="Write this run's outputs under <output>/<chosen architecture>/ (the throughput "
                                    "history stays in <output>, shared by all architectures)")
+    train_parser.add_argument("--dp-enabled", action="store_true", help="Enable differential privacy training (Opacus DP-SGD)")
+    train_parser.add_argument("--dp-noise-multiplier", type=float, default=None, help="DP noise multiplier (sigma)")
+    train_parser.add_argument("--dp-max-grad-norm", type=float, default=None, help="DP max gradient clipping norm (C)")
+    train_parser.add_argument("--dp-target-delta", type=float, default=None, help="DP target delta")
+    train_parser.add_argument("--dp-target-epsilon", type=float, default=None, help="DP target epsilon budget cap")
+    train_parser.add_argument("--dp-logical-batch-size", type=int, default=None, help="DP logical batch size defining sampling rate q")
+    train_parser.add_argument("--dp-state-path", default=None, help="Path to local dp_state.json")
 
     args = parser.parse_args()
 
@@ -115,6 +122,13 @@ def main():
                 canonical_base_model_version=args.canonical_base_model_version,
                 canonical_base_model_checksum=args.canonical_base_model_checksum,
                 proximal_mu=args.proximal_mu,
+                dp_enabled=args.dp_enabled,
+                dp_noise_multiplier=args.dp_noise_multiplier,
+                dp_max_grad_norm=args.dp_max_grad_norm,
+                dp_target_delta=args.dp_target_delta,
+                dp_target_epsilon=args.dp_target_epsilon,
+                dp_logical_batch_size=args.dp_logical_batch_size,
+                dp_state_path=args.dp_state_path,
             )
             print(f"Starting Module 7 training: {chosen.label} - {chosen.display_name}, {chosen.device}/{chosen.precision}, "
                   f"batch_size={chosen.batch_size}, epochs={chosen.epochs} (estimated {chosen.estimated_training_time_display})",

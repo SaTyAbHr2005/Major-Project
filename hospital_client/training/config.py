@@ -107,6 +107,15 @@ class TrainingConfig:
     # 0.0 = no proximal term (plain FedAvg local training, the unchanged default).
     proximal_mu: float = 0.0
 
+    # Differential Privacy (Module 10)
+    dp_enabled: bool = False
+    dp_noise_multiplier: Optional[float] = None
+    dp_max_grad_norm: Optional[float] = None
+    dp_target_delta: Optional[float] = None
+    dp_target_epsilon: Optional[float] = None
+    dp_logical_batch_size: Optional[int] = None
+    dp_state_path: Optional[str] = None
+
     def to_dict(self) -> dict:
         return {
             "model_id": self.model_id,
@@ -146,6 +155,13 @@ class TrainingConfig:
             "canonical_base_model_version": self.canonical_base_model_version,
             "canonical_base_model_checksum": self.canonical_base_model_checksum,
             "proximal_mu": self.proximal_mu,
+            "dp_enabled": self.dp_enabled,
+            "dp_noise_multiplier": self.dp_noise_multiplier,
+            "dp_max_grad_norm": self.dp_max_grad_norm,
+            "dp_target_delta": self.dp_target_delta,
+            "dp_target_epsilon": self.dp_target_epsilon,
+            "dp_logical_batch_size": self.dp_logical_batch_size,
+            "dp_state_path": self.dp_state_path,
         }
 
 
@@ -158,6 +174,22 @@ def validate_training_config(config: TrainingConfig) -> None:
 
     if config.federation_job_architecture and config.federation_job_architecture != config.model_config.architecture:
         raise ValueError(f"Federation architecture mismatch: job requires {config.federation_job_architecture} but TrainingConfig specifies {config.model_config.architecture}.")
+
+    if config.dp_enabled:
+        if config.proximal_mu > 0:
+            raise ValueError("Differential privacy cannot be combined with proximal_mu > 0 (FedProx).")
+        if config.dp_noise_multiplier is None or config.dp_noise_multiplier <= 0:
+            raise ValueError(f"dp_noise_multiplier must be > 0 when dp_enabled is True, got {config.dp_noise_multiplier!r}")
+        if config.dp_max_grad_norm is None or config.dp_max_grad_norm <= 0:
+            raise ValueError(f"dp_max_grad_norm must be > 0 when dp_enabled is True, got {config.dp_max_grad_norm!r}")
+        if config.dp_target_delta is None or not (0 < config.dp_target_delta < 1):
+            raise ValueError(f"dp_target_delta must be in (0, 1) when dp_enabled is True, got {config.dp_target_delta!r}")
+        if config.dp_target_epsilon is not None and config.dp_target_epsilon <= 0:
+            raise ValueError(f"dp_target_epsilon must be > 0, got {config.dp_target_epsilon!r}")
+        if config.dp_logical_batch_size is not None and config.dp_logical_batch_size < 1:
+            raise ValueError(f"dp_logical_batch_size must be >= 1, got {config.dp_logical_batch_size!r}")
+        if config.model_config.norm_type != "group":
+            raise ValueError("Differential privacy requires model_config.norm_type='group'.")
 
     if not config.model_id or not isinstance(config.model_id, str):
         raise ValueError(f"model_id must be a non-empty string, got {config.model_id!r}")

@@ -118,8 +118,59 @@ def build_model(config: ModelConfig) -> nn.Module:
     to a different one. Device placement is NOT done here - see device.py;
     this function always returns a CPU module, matching PyTorch's own
     default construction behavior.
+
+    When config.norm_type == "group", all BatchNorm layers are replaced with
+    GroupNorm using Opacus's ModuleValidator (required for differential-privacy
+    training with per-sample gradients).
     """
     from hospital_client.model_management.config import validate_model_config
     validate_model_config(config)
     factory = ARCHITECTURE_REGISTRY[config.architecture]
-    return factory(config)
+    model = factory(config)
+    if config.norm_type == "group":
+        import types
+        import torchvision.models as tv_models
+        from opacus.validators import ModuleValidator
+        model = ModuleValidator.fix(model)
+        for mod in model.modules():
+            if hasattr(mod, "inplace"):
+                mod.inplace = False
+            if isinstance(mod, tv_models.resnet.BasicBlock):
+                def _bb_forward(self, x):
+                    identity = x
+                    out = self.conv1(x)
+                    out = self.bn1(out)
+                    out = self.relu(out)
+                    out = self.conv2(out)
+                    out = self.bn2(out)
+                    if self.downsample is not None:
+                        identity = self.downsample(x)
+                    out = out + identity
+                    out = self.relu(out)
+                    return out
+                mod.forward = types.MethodType(_bb_forward, mod)
+            elif isinstance(mod, tv_models.resnet.Bottleneck):
+                def _bn_forward(self, x):
+                    identity = x
+                    out = self.conv1(x)
+                    out = self.bn1(out)
+                    out = self.relu(out)
+                    out = self.conv2(out)
+                    out = self.bn2(out)
+                    out = self.relu(out)
+                    out = self.conv3(out)
+                    out = self.bn3(out)
+                    if self.downsample is not None:
+                        identity = self.downsample(x)
+                    out = out + identity
+                    out = self.relu(out)
+                    return out
+                mod.forward = types.MethodType(_bn_forward, mod)
+            elif isinstance(mod, tv_models.mobilenetv3.InvertedResidual):
+                def _v3_forward(self, x):
+                    if self.use_res_connect:
+                        return x + self.block(x)
+                    return self.block(x)
+                mod.forward = types.MethodType(_v3_forward, mod)
+    return model
+

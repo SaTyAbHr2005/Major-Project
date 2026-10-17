@@ -1,12 +1,13 @@
 import os
 import json
 import sqlite3
+import uuid
 from typing import List, Optional, Dict, Any
 from .models import (
     FederationJob, FederationParticipant, FederationRound,
     FederationUpdate, GlobalModelVersion, EvaluationRecord,
     PromotionDecision, JobStatus, RoundStatus, UpdateStatus,
-    GlobalModelStatus, PromotionDecisionValue
+    GlobalModelStatus, PromotionDecisionValue, now_iso
 )
 
 class FederationStorage:
@@ -175,6 +176,22 @@ class FederationStorage:
                     evaluation_record_id TEXT,
                     reason TEXT,
                     metric_summary TEXT,
+                    created_at TEXT
+                )
+            ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS federation_dp_ledger (
+                    entry_id TEXT PRIMARY KEY,
+                    federation_job_id TEXT,
+                    round_id TEXT,
+                    participant_id TEXT,
+                    noise_multiplier REAL,
+                    sample_rate REAL,
+                    steps INTEGER,
+                    delta REAL,
+                    round_epsilon REAL,
+                    cumulative_epsilon REAL,
                     created_at TEXT
                 )
             ''')
@@ -470,3 +487,55 @@ class FederationStorage:
                 pd.decision.value, pd.promotion_policy_version, pd.evaluation_record_id, pd.reason,
                 json.dumps(pd.metric_summary), pd.created_at
             ))
+
+    # --- Differential Privacy Ledger (Module 10) ---
+    def record_dp_round(
+        self,
+        federation_job_id: str,
+        round_id: str,
+        participant_id: str,
+        noise_multiplier: float,
+        sample_rate: float,
+        steps: int,
+        delta: float,
+        round_epsilon: float,
+        cumulative_epsilon: float,
+    ) -> str:
+        entry_id = f"DPL-{uuid.uuid4().hex[:10].upper()}"
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO federation_dp_ledger
+                (entry_id, federation_job_id, round_id, participant_id,
+                 noise_multiplier, sample_rate, steps, delta,
+                 round_epsilon, cumulative_epsilon, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                entry_id, federation_job_id, round_id, participant_id,
+                noise_multiplier, sample_rate, steps, delta,
+                round_epsilon, cumulative_epsilon, now_iso()
+            ))
+        return entry_id
+
+    def get_dp_ledger(self, federation_job_id: str, participant_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if participant_id:
+                cursor = conn.execute(
+                    'SELECT * FROM federation_dp_ledger WHERE federation_job_id = ? AND participant_id = ? ORDER BY created_at ASC',
+                    (federation_job_id, participant_id)
+                )
+            else:
+                cursor = conn.execute(
+                    'SELECT * FROM federation_dp_ledger WHERE federation_job_id = ? ORDER BY created_at ASC',
+                    (federation_job_id,)
+                )
+            rows = cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    def compute_cumulative_dp_epsilon(self, federation_job_id: str, participant_id: str, delta: float) -> float:
+        rows = self.get_dp_ledger(federation_job_id, participant_id)
+        if not rows:
+            return 0.0
+        from hospital_client.training.dp import compute_rdp_epsilon
+        history = [(float(r["noise_multiplier"]), float(r["sample_rate"]), int(r["steps"])) for r in rows]
+        return compute_rdp_epsilon(history, delta)

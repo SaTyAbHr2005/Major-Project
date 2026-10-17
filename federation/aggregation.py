@@ -155,6 +155,11 @@ class Aggregator:
                 "total_samples": total_samples, "non_float_policy": "first_participant",
                 "strategy": (job.aggregation_configuration or {}).get("strategy", "fedavg"),
                 "proximal_mu": (job.training_requirements or {}).get("proximal_mu"),
+                "norm_type": "group" if bool(
+                    (job.training_requirements or {}).get("dp_enabled")
+                    or ((job.training_requirements or {}).get("dp_noise_multiplier") is not None
+                        and float((job.training_requirements or {}).get("dp_noise_multiplier", 0)) > 0)
+                ) else "batch",
             },
             class_mapping=job.class_mapping,
             schema_hash=schema_hash,

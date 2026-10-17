@@ -65,6 +65,29 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
     elif mu not in (None, 0, 0.0):
         raise ValueError("proximal_mu is only used with strategy 'fedprox'.")
 
+    dp_enabled = bool(
+        reqs.get("dp_enabled")
+        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+    )
+    if dp_enabled:
+        if strategy == "fedprox" or mu not in (None, 0, 0.0):
+            raise ValueError("Differential privacy cannot be combined with strategy 'fedprox' (FedProx proximal term).")
+        sigma = reqs.get("dp_noise_multiplier")
+        if not _is_number(sigma) or sigma <= 0:
+            raise ValueError(f"dp_noise_multiplier must be a number > 0, got {sigma!r}")
+        c = reqs.get("dp_max_grad_norm")
+        if not _is_number(c) or c <= 0:
+            raise ValueError(f"dp_max_grad_norm must be a number > 0, got {c!r}")
+        delta = reqs.get("dp_target_delta")
+        if not _is_number(delta) or not (0 < delta < 1):
+            raise ValueError(f"dp_target_delta must be a number in (0, 1), got {delta!r}")
+        target_eps = reqs.get("dp_target_epsilon")
+        if target_eps is not None and (not _is_number(target_eps) or target_eps <= 0):
+            raise ValueError(f"dp_target_epsilon must be a number > 0, got {target_eps!r}")
+        logical_b = reqs.get("dp_logical_batch_size")
+        if logical_b is not None and (not _is_int(logical_b) or logical_b < 1):
+            raise ValueError(f"dp_logical_batch_size must be an integer >= 1, got {logical_b!r}")
+
     total = agg.get("total_rounds")
     if total is not None and (not _is_int(total) or total < 1):
         raise ValueError(f"total_rounds must be an integer >= 1, got {total!r}")

@@ -9,6 +9,7 @@ Resource boundary: this module NEVER inspects hardware to choose device,
 batch size, or epochs - it only executes the TrainingConfig it is given
 (Module 8's future job is to populate that config).
 """
+import math
 import os
 import time
 from typing import Optional
@@ -137,6 +138,45 @@ class Trainer:
         loss_fn = build_loss(config.class_weighting, prepared, device)
         model_store = ModelStore(_models_dir(config.output_dir))
 
+        # ── Differential Privacy (Module 10) ──────────────────────────────────
+        dp_engine = None
+        dp_sample_rate = None
+        dp_existing_history = []
+        dp_state_path = None
+        dp_state = None
+        if config.dp_enabled:
+            from hospital_client.training.dp import (
+                load_dp_state,
+                project_and_check_budget,
+                prepare_dp_training,
+            )
+            dataset_size = len(prepared.train_loader.dataset)
+            logical_batch_size = config.dp_logical_batch_size or config.batch_size
+            dp_sample_rate = logical_batch_size / max(dataset_size, 1)
+            planned_steps = int(math.ceil(dataset_size / logical_batch_size)) * config.epochs
+            dp_state_path = config.dp_state_path or os.path.join(config.output_dir, f"dp_state_{config.model_id}.json")
+            dp_state = load_dp_state(dp_state_path, config.model_id)
+            dp_existing_history = [
+                (float(entry["noise_multiplier"]), float(entry["sample_rate"]), int(entry["steps"]))
+                for entry in dp_state.get("history", [])
+            ]
+            project_and_check_budget(
+                existing_history=dp_existing_history,
+                noise_multiplier=config.dp_noise_multiplier,
+                sample_rate=dp_sample_rate,
+                planned_steps=planned_steps,
+                target_delta=config.dp_target_delta,
+                target_epsilon=config.dp_target_epsilon,
+            )
+            dp_engine, model, optimizer, prepared.train_loader = prepare_dp_training(
+                model=model,
+                optimizer=optimizer,
+                train_loader=prepared.train_loader,
+                noise_multiplier=config.dp_noise_multiplier,
+                max_grad_norm=config.dp_max_grad_norm,
+                poisson_sampling=True,
+            )
+
         start_epoch = 1
         best_metric: Optional[float] = None
         best_epoch: Optional[int] = None
@@ -176,6 +216,8 @@ class Trainer:
                 )
                 epochs_run += 1
                 train_metrics_dict = train_metrics.to_dict()
+                if config.dp_enabled:
+                    train_metrics_dict["sample_count"] = len(prepared.train_loader.dataset)
 
                 do_validate = prepared.validation_loader is not None and (epoch % config.validate_every == 0)
                 if do_validate:
@@ -194,8 +236,9 @@ class Trainer:
 
                     if self._is_better(current, best_metric, mode):
                         best_metric, best_epoch, early_stop_counter = current, epoch, 0
+                        save_model = getattr(model, "_module", model)
                         metadata = model_store.save_checkpoint(
-                            model, config.model_config, config.model_id, status="trained",
+                            save_model, config.model_config, config.model_id, status="trained",
                             extra_metadata={
                                 "epochs": epoch,
                                 "optimizer": config.optimizer,
@@ -250,8 +293,9 @@ class Trainer:
         # disabled) but training did complete epochs - save the final state so a
         # checkpoint always exists after a completed run.
         if checkpoint_model_id is None and epochs_run > 0 and failed_error is None:
+            save_model = getattr(model, "_module", model)
             metadata = model_store.save_checkpoint(
-                model, config.model_config, config.model_id, status="trained",
+                save_model, config.model_config, config.model_id, status="trained",
                 extra_metadata={
                     "epochs": epochs_run, "optimizer": config.optimizer,
                     "learning_rate": config.learning_rate, "random_seed": config.random_seed,
@@ -283,6 +327,29 @@ class Trainer:
         else:
             status = TrainingStatus.TRAINING_COMPLETED
 
+        training_config_dict = config.to_dict()
+        if config.dp_enabled and dp_engine is not None and dp_state is not None:
+            from hospital_client.training.dp import compute_rdp_epsilon, save_dp_state
+            steps_taken = sum(int(entry[2]) for entry in dp_engine.accountant.history)
+            round_history = [(config.dp_noise_multiplier, dp_sample_rate, steps_taken)]
+            round_eps = compute_rdp_epsilon(round_history, config.dp_target_delta)
+            cumulative_eps = compute_rdp_epsilon(dp_existing_history + round_history, config.dp_target_delta)
+            round_identifier = config.canonical_base_model_id or f"round_{config.model_id}"
+            dp_state["history"].append({
+                "round_id": round_identifier,
+                "noise_multiplier": config.dp_noise_multiplier,
+                "sample_rate": dp_sample_rate,
+                "steps": steps_taken,
+                "delta": config.dp_target_delta,
+                "round_epsilon": round_eps,
+                "cumulative_epsilon": cumulative_eps,
+            })
+            save_dp_state(dp_state_path, dp_state)
+            training_config_dict["dp_sample_rate"] = dp_sample_rate
+            training_config_dict["dp_steps"] = steps_taken
+            training_config_dict["dp_epsilon"] = round_eps
+            training_config_dict["dp_cumulative_epsilon"] = cumulative_eps
+
         return TrainingResult(
             status=status,
             model_id=config.model_id,
@@ -296,7 +363,7 @@ class Trainer:
             validation_metrics=val_metrics_dict,
             test_metrics=test_metrics_dict,
             class_mapping=prepared.class_mapping,
-            training_configuration=config.to_dict(),
+            training_configuration=training_config_dict,
             random_seed=config.random_seed,
             resolved_precision=precision,
             warnings=warnings,
@@ -336,34 +403,59 @@ class Trainer:
         total_loss, n_samples = 0.0, 0
         all_true, all_pred, all_probs = [], [], []
         autocast_enabled = precision == "fp16"
-        with torch.set_grad_enabled(train_mode):
-            for images, labels in loader:
-                images, labels = images.to(device), labels.to(device)
-                if train_mode:
-                    optimizer.zero_grad()
-                with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled):
-                    outputs = model(images)
-                    loss = loss_fn(outputs, labels)
-                if train_mode:
-                    objective = loss
-                    if self._prox_anchor is not None:
-                        # FedProx proximal term, in fp32 outside autocast. Reported loss/metrics stay
-                        # the plain classification loss so runs with and without FedProx compare directly.
-                        objective = loss + (self.config.proximal_mu / 2) * sum(
-                            (p.float() - a.float()).pow(2).sum() for p, a in zip(model.parameters(), self._prox_anchor))
-                    # scaler with enabled=False (FP32) is a documented no-op passthrough:
-                    # scale()/step()/update() behave exactly like plain backward()/step().
-                    scaler.scale(objective).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
-                batch_size = labels.size(0)
-                total_loss += loss.item() * batch_size
-                n_samples += batch_size
-                preds = outputs.argmax(dim=1)
-                all_true.extend(labels.detach().cpu().tolist())
-                all_pred.extend(preds.detach().cpu().tolist())
-                if collect is not None:
-                    all_probs.extend(torch.softmax(outputs.detach().float(), dim=1).cpu().tolist())
+
+        if train_mode and self.config.dp_enabled:
+            from opacus.utils.batch_memory_manager import BatchMemoryManager
+            with torch.set_grad_enabled(train_mode):
+                with BatchMemoryManager(data_loader=loader, max_physical_batch_size=self.config.batch_size, optimizer=optimizer) as bmm:
+                    for images, labels in bmm:
+                        if images.size(0) == 0:
+                            continue
+                        images, labels = images.to(device), labels.to(device)
+                        optimizer.zero_grad()
+                        with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled):
+                            outputs = model(images)
+                            loss = loss_fn(outputs, labels)
+                        scaler.scale(loss).backward()
+                        scaler.step(optimizer)
+                        scaler.update()
+                        batch_size = labels.size(0)
+                        total_loss += loss.item() * batch_size
+                        n_samples += batch_size
+                        preds = outputs.argmax(dim=1)
+                        all_true.extend(labels.detach().cpu().tolist())
+                        all_pred.extend(preds.detach().cpu().tolist())
+                        if collect is not None:
+                            all_probs.extend(torch.softmax(outputs.detach().float(), dim=1).cpu().tolist())
+        else:
+            with torch.set_grad_enabled(train_mode):
+                for images, labels in loader:
+                    images, labels = images.to(device), labels.to(device)
+                    if train_mode:
+                        optimizer.zero_grad()
+                    with torch.amp.autocast(device_type=device.type, dtype=torch.float16, enabled=autocast_enabled):
+                        outputs = model(images)
+                        loss = loss_fn(outputs, labels)
+                    if train_mode:
+                        objective = loss
+                        if self._prox_anchor is not None:
+                            # FedProx proximal term, in fp32 outside autocast. Reported loss/metrics stay
+                            # the plain classification loss so runs with and without FedProx compare directly.
+                            objective = loss + (self.config.proximal_mu / 2) * sum(
+                                (p.float() - a.float()).pow(2).sum() for p, a in zip(model.parameters(), self._prox_anchor))
+                        # scaler with enabled=False (FP32) is a documented no-op passthrough:
+                        # scale()/step()/update() behave exactly like plain backward()/step().
+                        scaler.scale(objective).backward()
+                        scaler.step(optimizer)
+                        scaler.update()
+                    batch_size = labels.size(0)
+                    total_loss += loss.item() * batch_size
+                    n_samples += batch_size
+                    preds = outputs.argmax(dim=1)
+                    all_true.extend(labels.detach().cpu().tolist())
+                    all_pred.extend(preds.detach().cpu().tolist())
+                    if collect is not None:
+                        all_probs.extend(torch.softmax(outputs.detach().float(), dim=1).cpu().tolist())
         if collect is not None:
             collect["y_true"], collect["probs"] = all_true, all_probs
         avg_loss = total_loss / n_samples if n_samples else 0.0

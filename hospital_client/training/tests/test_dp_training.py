@@ -1,0 +1,111 @@
+import json
+import os
+import pytest
+
+from hospital_client.model_management.config import ModelConfig
+from hospital_client.training.config import TrainingConfig, validate_training_config
+from hospital_client.training.dp import PrivacyBudgetExceededError
+from hospital_client.training.result import TrainingStatus
+from hospital_client.training.trainer import Trainer, build_federation_handoff
+
+
+def _dp_config(dataset_dir, output_dir, **overrides):
+    defaults = dict(
+        model_id="dp_model",
+        model_config=ModelConfig(architecture="resnet18", num_classes=2, input_size=(64, 64), norm_type="group"),
+        dataset_dir=dataset_dir,
+        output_dir=output_dir,
+        epochs=2,
+        batch_size=4,
+        dp_enabled=True,
+        dp_noise_multiplier=1.0,
+        dp_max_grad_norm=1.0,
+        dp_target_delta=1e-5,
+        dp_target_epsilon=100.0,
+    )
+    defaults.update(overrides)
+    return TrainingConfig(**defaults)
+
+
+def test_dp_pre_training_budget_refusal(small_dataset_dir, tmp_path):
+    """The hospital must project epsilon and refuse before training if the cap would be exceeded."""
+    output_dir = str(tmp_path / "out_refuse")
+    # A tiny target epsilon (0.001) that cannot possibly cover 2 epochs of training
+    config = _dp_config(small_dataset_dir, output_dir, dp_target_epsilon=0.001)
+    with pytest.raises(PrivacyBudgetExceededError, match="Privacy budget exceeded"):
+        Trainer(config).run()
+
+
+def test_dp_training_execution_and_accounting(small_dataset_dir, tmp_path):
+    """Real DP training with Opacus Poisson sampling, BatchMemoryManager, and RDP accounting."""
+    output_dir = str(tmp_path / "out_dp")
+    config = _dp_config(small_dataset_dir, output_dir, epochs=1, batch_size=4)
+    result = Trainer(config).run()
+
+    assert result.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
+    tc = result.training_configuration
+    assert tc["dp_enabled"] is True
+    assert tc["dp_noise_multiplier"] == 1.0
+    assert tc["dp_max_grad_norm"] == 1.0
+    assert tc["dp_target_delta"] == 1e-5
+    assert tc["dp_sample_rate"] > 0
+    assert tc["dp_steps"] > 0
+    assert tc["dp_epsilon"] > 0
+    assert tc["dp_cumulative_epsilon"] >= tc["dp_epsilon"]
+
+    # Verify local dp_state.json persistence
+    state_path = os.path.join(output_dir, "dp_state_dp_model.json")
+    assert os.path.exists(state_path)
+    with open(state_path, "r", encoding="utf-8") as f:
+        dp_state = json.load(f)
+    assert dp_state["job_id"] == "dp_model"
+    assert len(dp_state["history"]) == 1
+    entry = dp_state["history"][0]
+    assert entry["noise_multiplier"] == 1.0
+    assert entry["delta"] == 1e-5
+    assert entry["steps"] == tc["dp_steps"]
+
+    # Verify FederationHandoff includes all DP fields
+    handoff = build_federation_handoff(result, output_dir, round_id="R1", client_id="H1")
+    assert handoff.training_configuration["dp_enabled"] is True
+    assert handoff.training_configuration["dp_epsilon"] == tc["dp_epsilon"]
+    assert handoff.training_configuration["dp_cumulative_epsilon"] == tc["dp_cumulative_epsilon"]
+
+
+def test_batch_memory_manager_physical_batch_adaptation(small_dataset_dir, tmp_path):
+    """The logical batch defines q; Module 8 chooses the physical batch for BatchMemoryManager."""
+    output_dir = str(tmp_path / "out_bmm")
+    # Logical batch 8 with physical batch size 2
+    config = _dp_config(small_dataset_dir, output_dir, epochs=1, batch_size=2, dp_logical_batch_size=8)
+    result = Trainer(config).run()
+    assert result.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
+    tc = result.training_configuration
+    # q is based on logical batch 8, not physical batch 2
+    # In small_dataset_dir, train count is ~16 (70% of 24)
+    # q = 8 / N
+    assert tc["dp_logical_batch_size"] == 8
+    assert tc["batch_size"] == 2
+    assert tc["dp_sample_rate"] == 8.0 / result.training_metrics["sample_count"]
+
+
+def test_dp_rejects_fedprox_proximal_mu(small_dataset_dir, tmp_path):
+    """TrainingConfig validation must refuse proximal_mu > 0 together with dp_enabled."""
+    config = _dp_config(small_dataset_dir, str(tmp_path / "out"), proximal_mu=0.1)
+    with pytest.raises(ValueError, match="Differential privacy cannot be combined with proximal_mu"):
+        validate_training_config(config)
+
+
+def test_non_dp_training_unchanged(small_dataset_dir, tmp_path):
+    """Non-DP training runs without any Opacus overhead or DP state."""
+    config = TrainingConfig(
+        model_id="non_dp",
+        model_config=ModelConfig(architecture="resnet18", num_classes=2, input_size=(64, 64)),
+        dataset_dir=small_dataset_dir,
+        output_dir=str(tmp_path / "out_non_dp"),
+        epochs=1,
+        batch_size=4,
+    )
+    result = Trainer(config).run()
+    assert result.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
+    assert result.training_configuration.get("dp_enabled") is False
+    assert not os.path.exists(os.path.join(tmp_path / "out_non_dp", "dp_state_non_dp.json"))

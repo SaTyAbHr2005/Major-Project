@@ -65,7 +65,12 @@ class AppStrategy(fl.server.strategy.Strategy):
         self.eval_datasets_dir, self.poll = eval_datasets_dir, poll_seconds
         self.events = events or EventEmitter()
         job = storage.get_job(job_id)
-        self.keys = _state_keys(job.architecture, job.num_classes)
+        reqs = (job.training_requirements if job else {}) or {}
+        self.is_dp = bool(
+            reqs.get("dp_enabled")
+            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+        )
+        self.keys = _state_keys(job.architecture, job.num_classes) if job else []
         self.done = False
         self.round = None
         self.chosen: Dict[str, object] = {}     # hospital_id -> ClientProxy for the current round
@@ -82,6 +87,8 @@ class AppStrategy(fl.server.strategy.Strategy):
         if self.done:
             return []
         try:
+            if self.is_dp:
+                return self._configure_train(client_manager)
             return self._configure_train(client_manager) if server_round % 2 else self._configure_calibrate()
         except Exception as e:  # never leave the UIs on a step that is no longer running
             self._fail(f"Round could not start: {e}")
@@ -91,6 +98,8 @@ class AppStrategy(fl.server.strategy.Strategy):
         if self.done and not self.chosen:
             return None, {}
         try:
+            if self.is_dp:
+                return self._aggregate_train(results, failures), {}
             return (self._aggregate_train(results, failures) if server_round % 2
                     else self._aggregate_calibrate(results, failures)), {}
         except Exception as e:
@@ -260,6 +269,23 @@ class AppStrategy(fl.server.strategy.Strategy):
         self.gm_id = gm.global_model_id
         self.status.event("round_closed", f"Round {rnd.round_number} aggregated from {len(self.accepted)} update(s)",
                           round_id=rnd.round_id, participants=sorted(self.accepted))
+        if self.is_dp:
+            plan, next_round, warnings = after_aggregation(self.storage, self.events, self.job_id, self.gm_id, self.eval_datasets_dir)
+            version = self.storage.get_global_model(self.gm_id).version
+            self.status.event("global_model_created", f"Global model v{version} created", global_model_id=self.gm_id,
+                              round_id=rnd.round_id)
+            for w in warnings:
+                self.status.event("warning", w)
+            for h in self.accepted:
+                self.status.hospital(h, "done")
+            if next_round is not None:
+                self.status.event("round_opened", f"Round {next_round.round_number} opened",
+                                  round_id=next_round.round_id, round_number=next_round.round_number)
+            self.chosen = {}
+            if plan["finished"]:
+                self._finish(plan["reason"] or "Every planned round is complete.")
+            else:
+                self.status.set(state="waiting_for_hospitals", phase=None, message="")
         return ndarrays_to_parameters(FederationHandoff.load(gm.artifact_location).parameters)
 
     def _reject(self, hid: str, reason: str) -> None:
@@ -345,8 +371,9 @@ def serve(storage, job_id: str, address: str, status_path: str, verify_identity:
             status.heartbeat()
     threading.Thread(target=beat, daemon=True).start()
     try:
+        total_flower_rounds = remaining if strategy.is_dp else 2 * remaining
         fl.server.start_server(server_address=address, strategy=strategy,
-                               config=fl.server.ServerConfig(num_rounds=2 * remaining, round_timeout=hours * 3600 + 600))
+                               config=fl.server.ServerConfig(num_rounds=total_flower_rounds, round_timeout=hours * 3600 + 600))
     finally:
         stop.set()
     if status.data["state"] not in ("finished", "failed"):

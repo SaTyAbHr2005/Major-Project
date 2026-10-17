@@ -17,6 +17,8 @@ knows how to execute unchanged.
     hospital_client.training.trainer.Trainer  (Module 7, unmodified)
 """
 from hospital_client.model_management.config import ModelConfig
+from typing import Optional
+
 from hospital_client.model_management.registry import get_architecture_info
 from hospital_client.resource_training.recommender import RecommendedConfig
 from hospital_client.training.config import TrainingConfig
@@ -31,11 +33,20 @@ def to_training_config(
     canonical_base_model_version: int = None,
     canonical_base_model_checksum: str = None,
     proximal_mu: float = 0.0,
+    dp_enabled: bool = False,
+    dp_noise_multiplier: Optional[float] = None,
+    dp_max_grad_norm: Optional[float] = None,
+    dp_target_delta: Optional[float] = None,
+    dp_target_epsilon: Optional[float] = None,
+    dp_logical_batch_size: Optional[int] = None,
+    dp_state_path: Optional[str] = None,
 ) -> TrainingConfig:
     input_size = get_architecture_info(recommendation.architecture).default_input_size
+    norm_type = "group" if dp_enabled else "batch"
     model_config = ModelConfig(
         architecture=recommendation.architecture, num_classes=num_classes,
         input_size=input_size, color_mode=color_mode, pretrained=pretrained,
+        norm_type=norm_type,
     )
     return TrainingConfig(
         model_id=model_id, model_config=model_config, dataset_dir=dataset_dir, output_dir=output_dir,
@@ -48,4 +59,11 @@ def to_training_config(
         canonical_base_model_version=canonical_base_model_version,
         canonical_base_model_checksum=canonical_base_model_checksum,
         proximal_mu=proximal_mu,
+        dp_enabled=dp_enabled,
+        dp_noise_multiplier=dp_noise_multiplier,
+        dp_max_grad_norm=dp_max_grad_norm,
+        dp_target_delta=dp_target_delta,
+        dp_target_epsilon=dp_target_epsilon,
+        dp_logical_batch_size=dp_logical_batch_size,
+        dp_state_path=dp_state_path,
     )

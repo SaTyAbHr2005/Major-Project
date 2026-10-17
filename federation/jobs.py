@@ -23,6 +23,20 @@ class JobManager:
         if self.storage.get_job(federation_job_id) is not None:
             raise ValueError(f"Job {federation_job_id} already exists.")
         validate_plan(aggregation_configuration, training_requirements)
+
+        reqs = training_requirements or {}
+        dp_enabled = bool(
+            reqs.get("dp_enabled")
+            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+        )
+        if dp_enabled:
+            from hospital_client.model_management.config import ModelConfig
+            from hospital_client.model_management.registry import build_model
+            from opacus.validators import ModuleValidator
+            sample_model = build_model(ModelConfig(architecture=architecture, num_classes=num_classes, norm_type="group"))
+            if not ModuleValidator.is_valid(sample_model):
+                errors = ModuleValidator.validate(sample_model, strict=False)
+                raise ValueError(f"Architecture '{architecture}' is incompatible with differential privacy: {errors}")
             
         job = FederationJob(
             federation_job_id=federation_job_id,

@@ -957,6 +957,23 @@ def build_federated_training(ws, job: dict, dataset_id: str, round_info: Optiona
     if reqs.get("proximal_mu"):
         cmd.extend(["--proximal-mu", str(reqs["proximal_mu"])])
 
+    dp_enabled = bool(
+        reqs.get("dp_enabled")
+        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+    )
+    if dp_enabled:
+        cmd.append("--dp-enabled")
+        if reqs.get("dp_noise_multiplier") is not None:
+            cmd.extend(["--dp-noise-multiplier", str(reqs["dp_noise_multiplier"])])
+        if reqs.get("dp_max_grad_norm") is not None:
+            cmd.extend(["--dp-max-grad-norm", str(reqs["dp_max_grad_norm"])])
+        if reqs.get("dp_target_delta") is not None:
+            cmd.extend(["--dp-target-delta", str(reqs["dp_target_delta"])])
+        if reqs.get("dp_target_epsilon") is not None:
+            cmd.extend(["--dp-target-epsilon", str(reqs["dp_target_epsilon"])])
+        if reqs.get("dp_logical_batch_size") is not None:
+            cmd.extend(["--dp-logical-batch-size", str(reqs["dp_logical_batch_size"])])
+
     if round_info and round_info.get("base_model_id"):
         cmd.extend([
             "--canonical-base-model-id", round_info["base_model_id"],
@@ -1023,8 +1040,18 @@ def _save_received_base_model(ws, job: dict, parameters, round_info: dict) -> No
     store = ModelStore(os.path.join(ws.trained, arch, "models"))
     if os.path.isdir(os.path.join(store.root, model_id, f"v{version}")):
         return
-    config = ModelConfig(architecture=arch, num_classes=int(job.get("num_classes") or len(job.get("class_mapping") or {})),
-                         input_size=tuple(get_architecture_info(arch).default_input_size))
+    reqs = (job.get("training_requirements") or {})
+    dp_enabled = bool(
+        reqs.get("dp_enabled")
+        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+    )
+    norm_type = "group" if dp_enabled else "batch"
+    config = ModelConfig(
+        architecture=arch,
+        num_classes=int(job.get("num_classes") or len(job.get("class_mapping") or {})),
+        input_size=tuple(get_architecture_info(arch).default_input_size),
+        norm_type=norm_type,
+    )
     model = build_model(config)
     set_parameters(model, parameters)
     if _compute_parameters_checksum(get_parameters(model)) != round_info.get("base_model_checksum"):

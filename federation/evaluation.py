@@ -76,11 +76,13 @@ class EvaluationManager:
         # 2. Convert to a Module 6 Artifact for M16 Engine
         arch_info = get_architecture_info(gm.architecture)
         
+        norm_type = (gm.aggregation_metadata or {}).get("norm_type", "batch")
         config = ModelConfig(
             architecture=gm.architecture,
             num_classes=gm.parameter_metadata.get("num_classes", handoff.num_classes),
             input_size=arch_info.default_input_size,
-            color_mode="RGB"
+            color_mode="RGB",
+            norm_type=norm_type,
         )
         
         model = build_model(config)

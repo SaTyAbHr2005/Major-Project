@@ -129,6 +129,35 @@ class IntakeManager:
         update.status = UpdateStatus.ACCEPTED
         update.validated_at = now_iso()
         self.storage.save_update(update)
+
+        # Record in DP ledger if DP job
+        reqs = job.training_requirements or {}
+        dp_enabled = bool(
+            reqs.get("dp_enabled")
+            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+        )
+        if dp_enabled:
+            tc = handoff.training_configuration or {}
+            sigma = float(tc.get("dp_noise_multiplier", 0))
+            q = float(tc.get("dp_sample_rate", 0))
+            steps = int(tc.get("dp_steps", 0))
+            delta = float(tc.get("dp_target_delta", 0))
+            round_eps = float(tc.get("dp_epsilon", 0))
+            from hospital_client.training.dp import compute_rdp_epsilon
+            history_rows = self.storage.get_dp_ledger(federation_job_id, participant_id)
+            combined_history = [(float(r["noise_multiplier"]), float(r["sample_rate"]), int(r["steps"])) for r in history_rows] + [(sigma, q, steps)]
+            cumulative_eps = compute_rdp_epsilon(combined_history, delta)
+            self.storage.record_dp_round(
+                federation_job_id=federation_job_id,
+                round_id=round_id,
+                participant_id=participant_id,
+                noise_multiplier=sigma,
+                sample_rate=q,
+                steps=steps,
+                delta=delta,
+                round_epsilon=round_eps,
+                cumulative_epsilon=cumulative_eps,
+            )
         
         if participant_id not in rnd.accepted_participants:
             rnd.accepted_participants.append(participant_id)

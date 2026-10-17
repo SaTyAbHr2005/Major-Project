@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 SUPPORTED_COLOR_MODES = {"RGB", "L"}
+SUPPORTED_NORM_TYPES = {"batch", "group"}
 
 
 @dataclass
@@ -18,6 +19,9 @@ class ModelConfig:
     color_mode: str = "RGB"
     pretrained: bool = False
     dropout: Optional[float] = None
+    # Normalization type: "batch" (default, standard BatchNorm) or "group"
+    # (GroupNorm, required for Opacus differential-privacy training).
+    norm_type: str = "batch"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -27,6 +31,7 @@ class ModelConfig:
             "color_mode": self.color_mode,
             "pretrained": self.pretrained,
             "dropout": self.dropout,
+            "norm_type": self.norm_type,
         }
 
     @classmethod
@@ -39,6 +44,7 @@ class ModelConfig:
             color_mode=data.get("color_mode", "RGB"),
             pretrained=data.get("pretrained", False),
             dropout=data.get("dropout"),
+            norm_type=data.get("norm_type", "batch"),
         )
 
 
@@ -83,3 +89,8 @@ def validate_model_config(config: ModelConfig) -> None:
     if config.dropout is not None:
         if isinstance(config.dropout, bool) or not isinstance(config.dropout, (int, float)) or not (0.0 <= config.dropout < 1.0):
             raise ValueError(f"dropout must be a float in [0.0, 1.0), got {config.dropout!r}")
+
+    if config.norm_type not in SUPPORTED_NORM_TYPES:
+        raise ValueError(
+            f"norm_type must be one of {sorted(SUPPORTED_NORM_TYPES)}, got {config.norm_type!r}"
+        )
