@@ -80,6 +80,8 @@ class Trainer:
         torch.manual_seed(config.random_seed)
         device = resolve_device(config.device)  # raises clearly if CUDA unavailable - never falls back
         precision = resolve_precision(config.precision, device)
+        if config.dp_enabled:
+            precision = "fp32"
 
         prepared = build_dataloaders(config)
         warnings.extend(prepared.warnings)
@@ -155,7 +157,14 @@ class Trainer:
             dp_sample_rate = logical_batch_size / max(dataset_size, 1)
             planned_steps = int(math.ceil(dataset_size / logical_batch_size)) * config.epochs
             dp_state_path = config.dp_state_path or os.path.join(config.output_dir, f"dp_state_{config.model_id}.json")
-            dp_state = load_dp_state(dp_state_path, config.model_id)
+            job_id = config.dp_state_job_id
+            if not job_id and config.dp_state_path:
+                parent_dir = os.path.basename(os.path.dirname(os.path.abspath(config.dp_state_path)))
+                if parent_dir and parent_dir not in (".", "", "runs", "trained", "tmp"):
+                    job_id = parent_dir
+            if not job_id:
+                job_id = config.model_id
+            dp_state = load_dp_state(dp_state_path, job_id)
             dp_existing_history = [
                 (float(entry["noise_multiplier"]), float(entry["sample_rate"]), int(entry["steps"]))
                 for entry in dp_state.get("history", [])
@@ -174,6 +183,7 @@ class Trainer:
                 train_loader=prepared.train_loader,
                 noise_multiplier=config.dp_noise_multiplier,
                 max_grad_norm=config.dp_max_grad_norm,
+                sample_rate=dp_sample_rate,
                 poisson_sampling=True,
             )
 
@@ -330,22 +340,31 @@ class Trainer:
         training_config_dict = config.to_dict()
         if config.dp_enabled and dp_engine is not None and dp_state is not None:
             from hospital_client.training.dp import compute_rdp_epsilon, save_dp_state
-            steps_taken = sum(int(entry[2]) for entry in dp_engine.accountant.history)
-            round_history = [(config.dp_noise_multiplier, dp_sample_rate, steps_taken)]
+            if dp_engine.accountant.history:
+                reported_sigma = float(dp_engine.accountant.history[0][0])
+                reported_q = float(dp_engine.accountant.history[0][1])
+                steps_taken = sum(int(entry[2]) for entry in dp_engine.accountant.history)
+            else:
+                reported_sigma = float(config.dp_noise_multiplier)
+                reported_q = float(dp_sample_rate)
+                steps_taken = 0
+
+            round_history = [(reported_sigma, reported_q, steps_taken)]
             round_eps = compute_rdp_epsilon(round_history, config.dp_target_delta)
             cumulative_eps = compute_rdp_epsilon(dp_existing_history + round_history, config.dp_target_delta)
             round_identifier = config.canonical_base_model_id or f"round_{config.model_id}"
             dp_state["history"].append({
                 "round_id": round_identifier,
-                "noise_multiplier": config.dp_noise_multiplier,
-                "sample_rate": dp_sample_rate,
+                "noise_multiplier": reported_sigma,
+                "sample_rate": reported_q,
                 "steps": steps_taken,
                 "delta": config.dp_target_delta,
                 "round_epsilon": round_eps,
                 "cumulative_epsilon": cumulative_eps,
             })
             save_dp_state(dp_state_path, dp_state)
-            training_config_dict["dp_sample_rate"] = dp_sample_rate
+            training_config_dict["dp_noise_multiplier"] = reported_sigma
+            training_config_dict["dp_sample_rate"] = reported_q
             training_config_dict["dp_steps"] = steps_taken
             training_config_dict["dp_epsilon"] = round_eps
             training_config_dict["dp_cumulative_epsilon"] = cumulative_eps

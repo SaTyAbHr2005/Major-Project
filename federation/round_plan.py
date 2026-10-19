@@ -26,6 +26,8 @@ training_requirements
 import math
 from typing import Any, Dict, List, Optional, Tuple
 
+from hospital_client.training.dp import is_dp_job
+
 STRATEGIES = ("fedavg", "fedprox")
 PROTOCOLS = ("manual", "flower")
 EARLY_STOPPING_METRICS = ("accuracy", "f1")
@@ -65,11 +67,7 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
     elif mu not in (None, 0, 0.0):
         raise ValueError("proximal_mu is only used with strategy 'fedprox'.")
 
-    dp_enabled = bool(
-        reqs.get("dp_enabled")
-        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-    )
-    if dp_enabled:
+    if is_dp_job(reqs):
         if strategy == "fedprox" or mu not in (None, 0, 0.0):
             raise ValueError("Differential privacy cannot be combined with strategy 'fedprox' (FedProx proximal term).")
         sigma = reqs.get("dp_noise_multiplier")

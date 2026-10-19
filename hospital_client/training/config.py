@@ -115,6 +115,7 @@ class TrainingConfig:
     dp_target_epsilon: Optional[float] = None
     dp_logical_batch_size: Optional[int] = None
     dp_state_path: Optional[str] = None
+    dp_state_job_id: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -162,6 +163,7 @@ class TrainingConfig:
             "dp_target_epsilon": self.dp_target_epsilon,
             "dp_logical_batch_size": self.dp_logical_batch_size,
             "dp_state_path": self.dp_state_path,
+            "dp_state_job_id": self.dp_state_job_id,
         }
 
 
@@ -176,6 +178,8 @@ def validate_training_config(config: TrainingConfig) -> None:
         raise ValueError(f"Federation architecture mismatch: job requires {config.federation_job_architecture} but TrainingConfig specifies {config.model_config.architecture}.")
 
     if config.dp_enabled:
+        if config.precision != "fp32":
+            raise ValueError(f"Differential privacy requires precision='fp32', got {config.precision!r}.")
         if config.proximal_mu > 0:
             raise ValueError("Differential privacy cannot be combined with proximal_mu > 0 (FedProx).")
         if config.dp_noise_multiplier is None or config.dp_noise_multiplier <= 0:

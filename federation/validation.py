@@ -82,12 +82,14 @@ class UpdateValidator:
                              f"{handoff.training_configuration.get('proximal_mu')}.")
 
         # 9. Differential Privacy (Module 10)
-        reqs = job.training_requirements or {}
-        dp_enabled = bool(
-            reqs.get("dp_enabled")
-            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-        )
-        if dp_enabled:
+        from hospital_client.training.dp import is_dp_job
+        if is_dp_job(job):
+            # Enforce FP32 for DP jobs
+            resolved_precision = handoff.precision or (handoff.training_configuration or {}).get("precision")
+            if resolved_precision != "fp32":
+                raise ValueError(f"DP job requires precision='fp32', but update used {resolved_precision!r}.")
+
+            reqs = job.training_requirements or {}
             tc = handoff.training_configuration or {}
             if not tc.get("dp_enabled") and "dp_noise_multiplier" not in tc:
                 raise ValueError("DP job requires update to be trained with differential privacy enabled.")
@@ -110,6 +112,15 @@ class UpdateValidator:
             q = float(tc.get("dp_sample_rate", 0))
             if q <= 0 or q > 1.0:
                 raise ValueError(f"Invalid DP sample rate reported: {q}")
+
+            logical_b = reqs.get("dp_logical_batch_size")
+            if logical_b is not None and handoff.num_train_samples > 0:
+                expected_q = float(logical_b) / float(handoff.num_train_samples)
+                if abs(q - expected_q) > 1e-4:
+                    raise ValueError(
+                        f"DP sample rate mismatch: expected {expected_q:.6f} "
+                        f"({logical_b}/{handoff.num_train_samples}), got {q:.6f}"
+                    )
 
             steps = int(tc.get("dp_steps", 0))
             if steps <= 0:

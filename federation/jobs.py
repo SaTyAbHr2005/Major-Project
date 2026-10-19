@@ -2,6 +2,7 @@ from typing import Dict, List, Any, Optional
 from .models import FederationJob, JobStatus, now_iso
 from .storage import FederationStorage
 from .round_plan import validate_plan
+from hospital_client.training.dp import is_dp_job
 
 class JobManager:
     def __init__(self, storage: FederationStorage):
@@ -24,12 +25,7 @@ class JobManager:
             raise ValueError(f"Job {federation_job_id} already exists.")
         validate_plan(aggregation_configuration, training_requirements)
 
-        reqs = training_requirements or {}
-        dp_enabled = bool(
-            reqs.get("dp_enabled")
-            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-        )
-        if dp_enabled:
+        if is_dp_job(training_requirements):
             from hospital_client.model_management.config import ModelConfig
             from hospital_client.model_management.registry import build_model
             from opacus.validators import ModuleValidator

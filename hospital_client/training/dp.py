@@ -43,18 +43,38 @@ def compute_rdp_epsilon(history: List[Tuple[float, float, int]], delta: float) -
     return float(eps)
 
 
-def load_dp_state(state_path: str, job_id: str) -> Dict[str, Any]:
+def is_dp_job(job_or_reqs: Any) -> bool:
+    """Returns True if the job or training requirements enable Differential Privacy."""
+    if job_or_reqs is None:
+        return False
+    if hasattr(job_or_reqs, "training_requirements"):
+        reqs = job_or_reqs.training_requirements or {}
+    elif isinstance(job_or_reqs, dict) and "training_requirements" in job_or_reqs:
+        reqs = job_or_reqs.get("training_requirements") or {}
+    elif isinstance(job_or_reqs, dict):
+        reqs = job_or_reqs
+    else:
+        reqs = getattr(job_or_reqs, "training_requirements", {}) or {}
+
+    return bool(
+        reqs.get("dp_enabled")
+        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
+    )
+
+
+def load_dp_state(state_path: str, job_id: Optional[str] = None) -> Dict[str, Any]:
     """Loads the local DP state file for a job, or returns a blank state."""
     if os.path.exists(state_path):
         try:
             with open(state_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if data.get("job_id") == job_id and isinstance(data.get("history"), list):
-                    return data
+                if isinstance(data.get("history"), list):
+                    if job_id is None or data.get("job_id") == job_id:
+                        return data
         except Exception:
             pass
     return {
-        "job_id": job_id,
+        "job_id": job_id or "",
         "history": [],
     }
 
@@ -103,6 +123,7 @@ def prepare_dp_training(
     train_loader: DataLoader,
     noise_multiplier: float,
     max_grad_norm: float,
+    sample_rate: Optional[float] = None,
     poisson_sampling: bool = True,
 ) -> Tuple[Any, torch.nn.Module, torch.optim.Optimizer, DataLoader]:
     """
@@ -118,4 +139,11 @@ def prepare_dp_training(
         max_grad_norm=max_grad_norm,
         poisson_sampling=poisson_sampling,
     )
+    if sample_rate is not None and sample_rate > 0:
+        if hasattr(train_loader, "sample_rate"):
+            train_loader.sample_rate = sample_rate
+        if hasattr(train_loader, "batch_sampler") and hasattr(train_loader.batch_sampler, "sample_rate"):
+            train_loader.batch_sampler.sample_rate = sample_rate
+        optimizer.step_hook = privacy_engine.accountant.get_optimizer_hook_fn(sample_rate=sample_rate)
     return privacy_engine, model, optimizer, train_loader
+

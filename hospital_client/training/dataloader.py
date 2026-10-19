@@ -109,9 +109,14 @@ def build_dataloaders(config: TrainingConfig) -> PreparedData:
     color_mode = config.model_config.color_mode
 
     train_dataset = ManifestImageDataset(train_manifest, class_mapping, color_mode, input_size, augmentation_flags)
+    train_batch_size = (
+        config.dp_logical_batch_size
+        if config.dp_enabled and config.dp_logical_batch_size
+        else config.batch_size
+    )
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config.batch_size,
+        batch_size=train_batch_size,
         shuffle=True,
         drop_last=False,
         **_build_loader_kwargs(config),

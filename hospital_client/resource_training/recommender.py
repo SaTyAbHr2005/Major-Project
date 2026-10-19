@@ -361,8 +361,9 @@ def _nearest_tier(candidates: List[ModelAssessment], below: bool) -> List[ModelA
 def generate_recommendations(
     profile: ResourceProfile, policy: ResourcePolicy, dataset: DatasetCharacteristics,
     history: Optional[HistoricalThroughputStore] = None,
+    dp_enabled: bool = False,
 ) -> RecommendationSet:
-    evaluator = ResourceEvaluator(profile, policy, history)
+    evaluator = ResourceEvaluator(profile, policy, history, dp_enabled=dp_enabled)
     assessments = evaluator.evaluate_all(dataset)
     return select_recommendations(assessments, evaluator.hardware_tier, policy, dataset.num_train_samples)
 
@@ -532,7 +533,8 @@ def _alternative_config(rtype: str, alt_tier: str, alt: ModelAssessment, pick: M
 
 
 def manual_config(recommendation_set: RecommendationSet, architecture: str, policy: ResourcePolicy,
-                  batch_size: Optional[int] = None, epochs: Optional[int] = None) -> RecommendedConfig:
+                  batch_size: Optional[int] = None, epochs: Optional[int] = None,
+                  dp_enabled: bool = False) -> RecommendedConfig:
     """
     An operator-chosen configuration. Any architecture Module 8 assessed as feasible on this
     machine may be used, with an optional batch size (capped at the largest batch size Module 8
@@ -555,11 +557,14 @@ def manual_config(recommendation_set: RecommendationSet, architecture: str, poli
     chosen_epochs = epochs or a.epochs
     base = _with_epochs(a, chosen_epochs, policy) if chosen_epochs != a.epochs else a
     if batch_size is None and epochs is None:  # e.g. a same-tier alternative: Module 8's own settings
-        return _config_from_assessment(
+        config = _config_from_assessment(
             MANUAL, "MANUAL", a, f"Operator-selected model {a.display_name} with Module 8's settings for it on this machine.",
             "Chosen by the operator; performance must be measured on the target dataset.",
             label="Selected Model (Module 8 settings)",
         )
+        if dp_enabled:
+            config = replace(config, precision="fp32")
+        return config
     reason = f"Manual configuration: {a.display_name} with batch size {batch_size or a.batch_size} and {chosen_epochs} epochs."
     if batch_size is not None and batch_size != a.batch_size:
         reason += (f" The time estimate assumes Module 8's batch size ({a.batch_size}); a smaller batch usually "
@@ -569,4 +574,7 @@ def manual_config(recommendation_set: RecommendationSet, architecture: str, poli
         "Chosen by the operator; not one of Module 8's three recommendations. Performance must be measured on the target dataset.",
         label="Manual Configuration",
     )
-    return replace(config, batch_size=batch_size or a.batch_size)
+    updates = {"batch_size": batch_size or a.batch_size}
+    if dp_enabled:
+        updates["precision"] = "fp32"
+    return replace(config, **updates)

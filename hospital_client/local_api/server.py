@@ -957,12 +957,13 @@ def build_federated_training(ws, job: dict, dataset_id: str, round_info: Optiona
     if reqs.get("proximal_mu"):
         cmd.extend(["--proximal-mu", str(reqs["proximal_mu"])])
 
-    dp_enabled = bool(
-        reqs.get("dp_enabled")
-        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-    )
+    from hospital_client.training.dp import is_dp_job
+    dp_enabled = is_dp_job(job)
     if dp_enabled:
         cmd.append("--dp-enabled")
+        dp_state_path = os.path.join(ws.federation_runs, job["federation_job_id"], "dp_state.json")
+        cmd.extend(["--dp-state-path", dp_state_path])
+        cmd.extend(["--dp-state-job-id", job["federation_job_id"]])
         if reqs.get("dp_noise_multiplier") is not None:
             cmd.extend(["--dp-noise-multiplier", str(reqs["dp_noise_multiplier"])])
         if reqs.get("dp_max_grad_norm") is not None:
@@ -1040,12 +1041,8 @@ def _save_received_base_model(ws, job: dict, parameters, round_info: dict) -> No
     store = ModelStore(os.path.join(ws.trained, arch, "models"))
     if os.path.isdir(os.path.join(store.root, model_id, f"v{version}")):
         return
-    reqs = (job.get("training_requirements") or {})
-    dp_enabled = bool(
-        reqs.get("dp_enabled")
-        or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-    )
-    norm_type = "group" if dp_enabled else "batch"
+    from hospital_client.training.dp import is_dp_job
+    norm_type = "group" if is_dp_job(job) else "batch"
     config = ModelConfig(
         architecture=arch,
         num_classes=int(job.get("num_classes") or len(job.get("class_mapping") or {})),

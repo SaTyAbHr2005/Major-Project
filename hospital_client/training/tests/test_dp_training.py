@@ -95,6 +95,90 @@ def test_dp_rejects_fedprox_proximal_mu(small_dataset_dir, tmp_path):
         validate_training_config(config)
 
 
+def test_dp_rejects_non_fp32_precision(small_dataset_dir, tmp_path):
+    """validate_training_config must reject precision != 'fp32' when dp_enabled is True."""
+    config = _dp_config(small_dataset_dir, str(tmp_path / "out_fp16"), precision="fp16")
+    with pytest.raises(ValueError, match="Differential privacy requires precision='fp32'"):
+        validate_training_config(config)
+
+
+def test_dp_multi_round_state_persistence_across_runs(small_dataset_dir, tmp_path):
+    """
+    Two consecutive rounds of the same federation job with different model IDs and output dirs
+    must persist history in the shared dp_state.json. Round 2's pre-check and cumulative
+    epsilon must include Round 1.
+    """
+    job_id = "FED_JOB_MULTI_TEST"
+    dp_state_path = str(tmp_path / "federation_runs" / job_id / "dp_state.json")
+
+    # Round 1
+    out_r1 = str(tmp_path / "runs" / "FED_JOB_MULTI_TEST_20261019_010000")
+    config_r1 = _dp_config(
+        small_dataset_dir,
+        out_r1,
+        model_id="FED_JOB_MULTI_TEST_20261019_010000",
+        epochs=1,
+        batch_size=4,
+        dp_state_path=dp_state_path,
+        dp_state_job_id=job_id,
+        dp_target_epsilon=50.0,
+    )
+    result_r1 = Trainer(config_r1).run()
+    assert result_r1.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
+    eps_r1 = result_r1.training_configuration["dp_epsilon"]
+    cum_r1 = result_r1.training_configuration["dp_cumulative_epsilon"]
+    assert cum_r1 == eps_r1
+
+    # Verify state file on disk
+    assert os.path.exists(dp_state_path)
+    with open(dp_state_path, "r", encoding="utf-8") as f:
+        st = json.load(f)
+    assert st["job_id"] == job_id
+    assert len(st["history"]) == 1
+
+    # Round 2: Different timestamped model ID and output directory, same dp_state_path & job_id
+    out_r2 = str(tmp_path / "runs" / "FED_JOB_MULTI_TEST_20261019_020000")
+    config_r2 = _dp_config(
+        small_dataset_dir,
+        out_r2,
+        model_id="FED_JOB_MULTI_TEST_20261019_020000",
+        epochs=1,
+        batch_size=4,
+        dp_state_path=dp_state_path,
+        dp_state_job_id=job_id,
+        dp_target_epsilon=50.0,
+    )
+    result_r2 = Trainer(config_r2).run()
+    assert result_r2.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
+    eps_r2 = result_r2.training_configuration["dp_epsilon"]
+    cum_r2 = result_r2.training_configuration["dp_cumulative_epsilon"]
+
+    # Round 2 cumulative epsilon must be greater than both round 1 and round 2 standalone epsilons
+    assert cum_r2 > eps_r1
+    assert cum_r2 > eps_r2
+
+    with open(dp_state_path, "r", encoding="utf-8") as f:
+        st2 = json.load(f)
+    assert len(st2["history"]) == 2
+    assert st2["history"][0]["steps"] > 0
+    assert st2["history"][1]["steps"] > 0
+
+    # If round 3 would exceed target cap, pre-check refuses before starting training
+    out_r3 = str(tmp_path / "runs" / "FED_JOB_MULTI_TEST_20261019_030000")
+    config_r3 = _dp_config(
+        small_dataset_dir,
+        out_r3,
+        model_id="FED_JOB_MULTI_TEST_20261019_030000",
+        epochs=1,
+        batch_size=4,
+        dp_state_path=dp_state_path,
+        dp_state_job_id=job_id,
+        dp_target_epsilon=cum_r2 + 0.0001,  # tight cap that round 3 will exceed
+    )
+    with pytest.raises(PrivacyBudgetExceededError, match="Privacy budget exceeded"):
+        Trainer(config_r3).run()
+
+
 def test_non_dp_training_unchanged(small_dataset_dir, tmp_path):
     """Non-DP training runs without any Opacus overhead or DP state."""
     config = TrainingConfig(
@@ -109,3 +193,4 @@ def test_non_dp_training_unchanged(small_dataset_dir, tmp_path):
     assert result.status == TrainingStatus.TRAINING_COMPLETED_AWAITING_FEDERATION
     assert result.training_configuration.get("dp_enabled") is False
     assert not os.path.exists(os.path.join(tmp_path / "out_non_dp", "dp_state_non_dp.json"))
+

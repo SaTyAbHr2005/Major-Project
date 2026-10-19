@@ -535,6 +535,102 @@ def test_server_rejects_update_with_mismatched_delta(dp_job_setup):
     assert "delta" in upd.rejection_reason.lower()
 
 
+def test_server_rejects_update_with_mismatched_max_grad_norm(dp_job_setup):
+    """Server rejects an update that reports a different dp_max_grad_norm than required."""
+    storage, intake, job, rnd, sigma, delta, params, tmp_path = dp_job_setup
+    q, steps = 0.05, 50
+    round_eps = compute_rdp_epsilon([(sigma, q, steps)], delta)
+    handoff = build_federation_handoff(
+        parameters=params, model_id="WRONG_C", model_version=1,
+        architecture=job.architecture,
+        base_model_id=rnd.base_model_id, base_model_version=rnd.base_model_version,
+        base_model_checksum=rnd.base_model_checksum,
+        num_train_samples=40, class_mapping=job.class_mapping,
+        training_metrics={"loss": 0.4}, validation_metrics={},
+        training_configuration={
+            "dp_enabled": True,
+            "dp_noise_multiplier": sigma,
+            "dp_max_grad_norm": 0.5,    # Job requires 1.0
+            "dp_target_delta": delta,
+            "dp_sample_rate": q,
+            "dp_steps": steps,
+            "dp_epsilon": round_eps,
+        },
+        device="cpu", precision="fp32",
+        status="TRAINING_COMPLETED_AWAITING_FEDERATION",
+    )
+    hdir = str(tmp_path / "h_bad_c")
+    handoff.save(hdir)
+    upd = intake.receive_handoff(job.federation_job_id, rnd.round_id, "H1", hdir)
+    assert upd.status == UpdateStatus.REJECTED
+    assert "dp_max_grad_norm" in upd.rejection_reason.lower() or "max grad norm" in upd.rejection_reason.lower()
+
+
+def test_server_rejects_update_with_non_fp32_precision(dp_job_setup):
+    """Server rejects an update for a DP job that was trained in FP16."""
+    storage, intake, job, rnd, sigma, delta, params, tmp_path = dp_job_setup
+    q, steps = 0.05, 50
+    round_eps = compute_rdp_epsilon([(sigma, q, steps)], delta)
+    handoff = build_federation_handoff(
+        parameters=params, model_id="FP16_DP", model_version=1,
+        architecture=job.architecture,
+        base_model_id=rnd.base_model_id, base_model_version=rnd.base_model_version,
+        base_model_checksum=rnd.base_model_checksum,
+        num_train_samples=40, class_mapping=job.class_mapping,
+        training_metrics={"loss": 0.4}, validation_metrics={},
+        training_configuration={
+            "dp_enabled": True,
+            "dp_noise_multiplier": sigma,
+            "dp_max_grad_norm": 1.0,
+            "dp_target_delta": delta,
+            "dp_sample_rate": q,
+            "dp_steps": steps,
+            "dp_epsilon": round_eps,
+            "precision": "fp16",
+        },
+        device="cuda", precision="fp16",
+        status="TRAINING_COMPLETED_AWAITING_FEDERATION",
+    )
+    hdir = str(tmp_path / "h_fp16")
+    handoff.save(hdir)
+    upd = intake.receive_handoff(job.federation_job_id, rnd.round_id, "H1", hdir)
+    assert upd.status == UpdateStatus.REJECTED
+    assert "fp32" in upd.rejection_reason.lower()
+
+
+def test_server_rejects_update_with_mismatched_sample_rate(dp_job_setup):
+    """Server rejects an update when reported q does not match logical_batch_size / sample_count."""
+    storage, intake, job, rnd, sigma, delta, params, tmp_path = dp_job_setup
+    job.training_requirements["dp_logical_batch_size"] = 10
+    storage.save_job(job)
+    # Expected q = 10 / 40 = 0.25; client reports 0.05
+    round_eps = compute_rdp_epsilon([(sigma, 0.05, 50)], delta)
+    handoff = build_federation_handoff(
+        parameters=params, model_id="WRONG_Q", model_version=1,
+        architecture=job.architecture,
+        base_model_id=rnd.base_model_id, base_model_version=rnd.base_model_version,
+        base_model_checksum=rnd.base_model_checksum,
+        num_train_samples=40, class_mapping=job.class_mapping,
+        training_metrics={"loss": 0.4}, validation_metrics={},
+        training_configuration={
+            "dp_enabled": True,
+            "dp_noise_multiplier": sigma,
+            "dp_max_grad_norm": 1.0,
+            "dp_target_delta": delta,
+            "dp_sample_rate": 0.05,  # Mismatched! Expected 0.25
+            "dp_steps": 50,
+            "dp_epsilon": round_eps,
+        },
+        device="cpu", precision="fp32",
+        status="TRAINING_COMPLETED_AWAITING_FEDERATION",
+    )
+    hdir = str(tmp_path / "h_bad_q")
+    handoff.save(hdir)
+    upd = intake.receive_handoff(job.federation_job_id, rnd.round_id, "H1", hdir)
+    assert upd.status == UpdateStatus.REJECTED
+    assert "sample rate" in upd.rejection_reason.lower()
+
+
 # ── 3b: round_plan DP range checks and FedProx+DP rejection ──────────────────
 
 def test_round_plan_rejects_fedprox_with_dp():

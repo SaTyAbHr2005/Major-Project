@@ -65,11 +65,8 @@ class AppStrategy(fl.server.strategy.Strategy):
         self.eval_datasets_dir, self.poll = eval_datasets_dir, poll_seconds
         self.events = events or EventEmitter()
         job = storage.get_job(job_id)
-        reqs = (job.training_requirements if job else {}) or {}
-        self.is_dp = bool(
-            reqs.get("dp_enabled")
-            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-        )
+        from hospital_client.training.dp import is_dp_job
+        self.is_dp = is_dp_job(job)
         self.keys = _state_keys(job.architecture, job.num_classes) if job else []
         self.done = False
         self.round = None

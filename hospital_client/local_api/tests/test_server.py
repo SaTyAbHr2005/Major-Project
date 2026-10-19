@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import threading
 import time
@@ -474,6 +475,44 @@ def test_manual_and_flower_rounds_build_the_same_training_command(api, tmp_path,
         return [("MODEL" if a.startswith("FED_JOB1_") else a) for a in c]
     assert norm(cmd) == norm(started[0])
     assert "--canonical-base-model-checksum" in cmd and "--epochs" in cmd and meta["round_id"] == "JOB1_R1"
+
+
+def test_build_federated_training_dp_flags_and_state_path(tmp_path, monkeypatch):
+    _fake_dataset(tmp_path, monkeypatch)
+    ws = server.Workspace("HOSP_1")
+    dp_job = {
+        **FLOWER_JOB,
+        "federation_job_id": "JOB_DP_TEST",
+        "training_requirements": {
+            "epochs": 2,
+            "dp_enabled": True,
+            "dp_noise_multiplier": 1.2,
+            "dp_max_grad_norm": 1.0,
+            "dp_target_delta": 1e-5,
+            "dp_target_epsilon": 15.0,
+            "dp_logical_batch_size": 16,
+        },
+        "rounds": [ROUND],
+    }
+    cmd, meta, model_id, run_dir = server.build_federated_training(ws, dp_job, "0123456789ab", ROUND)
+    assert "--dp-enabled" in cmd
+    assert "--dp-noise-multiplier" in cmd
+    assert cmd[cmd.index("--dp-noise-multiplier") + 1] == "1.2"
+    assert "--dp-max-grad-norm" in cmd
+    assert cmd[cmd.index("--dp-max-grad-norm") + 1] == "1.0"
+    assert "--dp-target-delta" in cmd
+    assert cmd[cmd.index("--dp-target-delta") + 1] in ("1e-05", "0.00001", "1e-5")
+    assert "--dp-target-epsilon" in cmd
+    assert cmd[cmd.index("--dp-target-epsilon") + 1] == "15.0"
+    assert "--dp-logical-batch-size" in cmd
+    assert cmd[cmd.index("--dp-logical-batch-size") + 1] == "16"
+    assert "--dp-state-path" in cmd
+    state_idx = cmd.index("--dp-state-path")
+    expected_path = os.path.join(ws.federation_runs, "JOB_DP_TEST", "dp_state.json")
+    assert cmd[state_idx + 1] == expected_path
+    assert "--dp-state-job-id" in cmd
+    job_idx = cmd.index("--dp-state-job-id")
+    assert cmd[job_idx + 1] == "JOB_DP_TEST"
 
 
 def test_model_received_over_flower_is_stored_where_the_trainer_reads_it(tmp_path):

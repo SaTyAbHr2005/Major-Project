@@ -15,6 +15,7 @@ from hospital_client.model_management.parameters import get_parameters, set_para
 from hospital_client.model_management.registry import build_model, get_architecture_info
 from hospital_client.model_management.store import ModelStore
 from hospital_client.model_management.validation import ARTIFACT_FILENAME, METADATA_FILENAME
+from hospital_client.training.dp import is_dp_job
 from hospital_client.training.federation import FederationHandoff, _compute_parameters_checksum
 
 BASE_MODEL_VERSION = 1
@@ -32,9 +33,7 @@ def prepare_base_model(storage, job, previous_global_model: Optional[dict] = Non
     model_id = previous_global_model["global_model_id"] if previous_global_model else f"SEED_{job.federation_job_id}"
 
     if not os.path.isdir(os.path.join(store.root, model_id, f"v{BASE_MODEL_VERSION}")):
-        reqs = job.training_requirements or {}
-        dp_enabled = reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0
-        norm_type = "group" if dp_enabled else "batch"
+        norm_type = "group" if is_dp_job(job) else "batch"
         config = ModelConfig(
             architecture=job.architecture,
             num_classes=job.num_classes,

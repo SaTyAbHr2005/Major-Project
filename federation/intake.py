@@ -131,12 +131,8 @@ class IntakeManager:
         self.storage.save_update(update)
 
         # Record in DP ledger if DP job
-        reqs = job.training_requirements or {}
-        dp_enabled = bool(
-            reqs.get("dp_enabled")
-            or (reqs.get("dp_noise_multiplier") is not None and float(reqs.get("dp_noise_multiplier", 0)) > 0)
-        )
-        if dp_enabled:
+        from hospital_client.training.dp import is_dp_job
+        if is_dp_job(job):
             tc = handoff.training_configuration or {}
             sigma = float(tc.get("dp_noise_multiplier", 0))
             q = float(tc.get("dp_sample_rate", 0))

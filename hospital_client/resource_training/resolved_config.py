@@ -40,6 +40,7 @@ def to_training_config(
     dp_target_epsilon: Optional[float] = None,
     dp_logical_batch_size: Optional[int] = None,
     dp_state_path: Optional[str] = None,
+    dp_state_job_id: Optional[str] = None,
 ) -> TrainingConfig:
     input_size = get_architecture_info(recommendation.architecture).default_input_size
     norm_type = "group" if dp_enabled else "batch"
@@ -48,9 +49,10 @@ def to_training_config(
         input_size=input_size, color_mode=color_mode, pretrained=pretrained,
         norm_type=norm_type,
     )
+    precision = "fp32" if dp_enabled else recommendation.precision
     return TrainingConfig(
         model_id=model_id, model_config=model_config, dataset_dir=dataset_dir, output_dir=output_dir,
-        device=recommendation.device, precision=recommendation.precision,
+        device=recommendation.device, precision=precision,
         epochs=recommendation.epochs, batch_size=recommendation.batch_size,
         num_workers=recommendation.num_workers, run_test_evaluation=run_test_evaluation,
         canonical_class_mapping=canonical_mapping,
@@ -66,4 +68,5 @@ def to_training_config(
         dp_target_epsilon=dp_target_epsilon,
         dp_logical_batch_size=dp_logical_batch_size,
         dp_state_path=dp_state_path,
+        dp_state_job_id=dp_state_job_id,
     )

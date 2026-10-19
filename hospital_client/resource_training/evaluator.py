@@ -147,17 +147,18 @@ def _batch_memory_table(heuristic_at_chosen, total_at_chosen_mb: float, chosen_b
 
 
 class ResourceEvaluator:
-    def __init__(self, profile: ResourceProfile, policy: ResourcePolicy, history: Optional[HistoricalThroughputStore] = None):
+    def __init__(self, profile: ResourceProfile, policy: ResourcePolicy, history: Optional[HistoricalThroughputStore] = None, dp_enabled: bool = False):
         self.profile = profile
         self.policy = policy
         self.history = history
+        self.dp_enabled = dp_enabled
         self.device_type, self.device_fallback_reason = select_device(profile)
         self.hardware_tier = classify_hardware_tier(profile, self.device_type, policy)
 
     def evaluate_model(self, architecture: str, dataset: DatasetCharacteristics) -> ModelAssessment:
         policy = self.policy
         measured = measure_model_profile(architecture, dataset.num_classes)
-        precision = "fp16" if (self.device_type == "cuda" and policy.prefer_fp16_on_cuda) else "fp32"
+        precision = "fp32" if self.dp_enabled else ("fp16" if (self.device_type == "cuda" and policy.prefer_fp16_on_cuda) else "fp32")
         optimizer = policy.default_optimizer
         usable_mb = _usable_memory_mb(self.profile, self.device_type, policy)
         available_mb = (

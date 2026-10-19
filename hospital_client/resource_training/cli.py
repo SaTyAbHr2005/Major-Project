@@ -34,6 +34,8 @@ def main():
     recommend_parser.add_argument("--dataset", dest="dataset_dir", required=True)
     recommend_parser.add_argument("--output", dest="output_dir", default=".")
     recommend_parser.add_argument("--policy", dest="policy_path", default=None)
+    recommend_parser.add_argument("--dp-enabled", action="store_true",
+                                  help="Filter recommendations to those compatible with DP training")
 
     train_parser = subparsers.add_parser("train", help="Resolve a recommendation and run Module 7 training")
     train_parser.add_argument("--dataset", dest="dataset_dir", required=True)
@@ -65,6 +67,7 @@ def main():
     train_parser.add_argument("--dp-target-epsilon", type=float, default=None, help="DP target epsilon budget cap")
     train_parser.add_argument("--dp-logical-batch-size", type=int, default=None, help="DP logical batch size defining sampling rate q")
     train_parser.add_argument("--dp-state-path", default=None, help="Path to local dp_state.json")
+    train_parser.add_argument("--dp-state-job-id", default=None, help="Job identifier for local dp_state.json")
 
     args = parser.parse_args()
 
@@ -79,7 +82,7 @@ def main():
             profile = build_resource_profile(storage_path=args.output_dir, policy=policy)
             dataset = inspect_dataset(args.dataset_dir)
             history = HistoricalThroughputStore(_history_path(args.output_dir))
-            rec_set = generate_recommendations(profile, policy, dataset, history)
+            rec_set = generate_recommendations(profile, policy, dataset, history, dp_enabled=args.dp_enabled)
             print(json.dumps(rec_set.to_dict(), indent=2))
 
         elif args.command == "train":
@@ -95,9 +98,9 @@ def main():
             profile = build_resource_profile(storage_path=args.output_dir, policy=policy)
             dataset = inspect_dataset(args.dataset_dir)
             history = HistoricalThroughputStore(_history_path(args.output_dir))
-            rec_set = generate_recommendations(profile, policy, dataset, history)
+            rec_set = generate_recommendations(profile, policy, dataset, history, dp_enabled=args.dp_enabled)
             if args.architecture:
-                chosen = manual_config(rec_set, args.architecture, policy, args.batch_size, args.epochs)
+                chosen = manual_config(rec_set, args.architecture, policy, args.batch_size, args.epochs, dp_enabled=args.dp_enabled)
             else:
                 chosen = next((r for r in rec_set.recommendations if r.recommendation_type == args.choice), None)
             if chosen is None:
@@ -129,6 +132,7 @@ def main():
                 dp_target_epsilon=args.dp_target_epsilon,
                 dp_logical_batch_size=args.dp_logical_batch_size,
                 dp_state_path=args.dp_state_path,
+                dp_state_job_id=args.dp_state_job_id,
             )
             print(f"Starting Module 7 training: {chosen.label} - {chosen.display_name}, {chosen.device}/{chosen.precision}, "
                   f"batch_size={chosen.batch_size}, epochs={chosen.epochs} (estimated {chosen.estimated_training_time_display})",
