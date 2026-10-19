@@ -64,6 +64,7 @@ def test_dp_multi_round_accounting_equals_combined_history(tmp_path):
         "dp_max_grad_norm": 1.0,
         "dp_target_delta": delta,
         "dp_target_epsilon": 20.0,
+        "dp_logical_batch_size": 2,  # q=0.05 * N=40
     }
     jm.create_job(
         federation_job_id=job_id,
@@ -289,6 +290,7 @@ def test_flower_dp_update_charged_to_ledger_exactly_once(tmp_path):
         "dp_max_grad_norm": 1.0,
         "dp_target_delta": delta,
         "dp_target_epsilon": 25.0,
+        "dp_logical_batch_size": 2,  # q=0.05 * N=40
     }
     jm.create_job(
         federation_job_id=job_id,
@@ -390,6 +392,7 @@ def dp_job_setup(tmp_path):
         "dp_max_grad_norm": 1.0,
         "dp_target_delta": delta,
         "dp_target_epsilon": 20.0,
+        "dp_logical_batch_size": 2,  # q=0.05 * N=40
     }
     jm.create_job(
         federation_job_id=job_id, task="T", task_type="image_classification",
@@ -674,7 +677,24 @@ def test_round_plan_rejects_negative_target_epsilon():
             {"strategy": "fedavg", "protocol": "manual"},
             {"dp_enabled": True, "dp_noise_multiplier": 1.1,
              "dp_max_grad_norm": 1.0, "dp_target_delta": 1e-5,
+             "dp_logical_batch_size": 64,
              "dp_target_epsilon": -1.0},
+        )
+
+
+def test_round_plan_rejects_missing_logical_batch_size():
+    """round_plan.validate_plan must refuse a DP plan without dp_logical_batch_size.
+    This guarantees the server's sample-rate check (q = B/N) always has a concrete
+    B and never depends on a per-hospital Module 8 batch size choice.
+    """
+    from federation.round_plan import validate_plan
+    with pytest.raises(ValueError, match="dp_logical_batch_size"):
+        validate_plan(
+            {"strategy": "fedavg", "protocol": "manual"},
+            {"dp_enabled": True, "dp_noise_multiplier": 1.1,
+             "dp_max_grad_norm": 1.0, "dp_target_delta": 1e-5,
+             "dp_target_epsilon": 10.0},
+            # dp_logical_batch_size intentionally omitted
         )
 
 
@@ -684,7 +704,8 @@ def test_round_plan_accepts_valid_dp_plan():
     validate_plan(
         {"strategy": "fedavg", "protocol": "flower", "total_rounds": 2, "round_duration_hours": 1.0},
         {"dp_enabled": True, "dp_noise_multiplier": 1.1,
-         "dp_max_grad_norm": 1.0, "dp_target_delta": 1e-5, "dp_target_epsilon": 10.0},
+         "dp_max_grad_norm": 1.0, "dp_target_delta": 1e-5,
+         "dp_logical_batch_size": 64, "dp_target_epsilon": 10.0},
     )
 
 
@@ -710,6 +731,7 @@ def test_flower_dp_configure_fit_never_produces_calibrate_phase(tmp_path):
         "dp_max_grad_norm": 1.0,
         "dp_target_delta": delta,
         "dp_target_epsilon": 25.0,
+        "dp_logical_batch_size": 2,  # q=0.05 * N=40
     }
     jm.create_job(
         federation_job_id=job_id, task="T", task_type="image_classification",
@@ -808,6 +830,7 @@ def test_jobs_refuses_architecture_failing_module_validator(tmp_path):
                     "dp_noise_multiplier": 1.1,
                     "dp_max_grad_norm": 1.0,
                     "dp_target_delta": 1e-5,
+                    "dp_logical_batch_size": 64,
                     "norm_type": "group",
                 },
                 aggregation_configuration={"protocol": "manual", "total_rounds": 1, "round_duration_hours": 1.0},

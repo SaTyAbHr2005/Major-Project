@@ -140,6 +140,13 @@ def prepare_dp_training(
         poisson_sampling=poisson_sampling,
     )
     if sample_rate is not None and sample_rate > 0:
+        # NOTE: The three assignments below reach into Opacus 1.6.0 internals:
+        #   train_loader.sample_rate       – UniformWithReplacementSampler attribute set by make_private
+        #   train_loader.batch_sampler.sample_rate – the same attribute on the underlying sampler
+        #   optimizer.step_hook            – closure registered by the accountant to record each step
+        # These are not part of the Opacus public API.  Before raising the opacus pin in
+        # requirements.txt, verify that all three attributes still exist with identical semantics
+        # in the target version, or replace this block with the public API equivalent.
         if hasattr(train_loader, "sample_rate"):
             train_loader.sample_rate = sample_rate
         if hasattr(train_loader, "batch_sampler") and hasattr(train_loader.batch_sampler, "sample_rate"):

@@ -83,8 +83,8 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
         if target_eps is not None and (not _is_number(target_eps) or target_eps <= 0):
             raise ValueError(f"dp_target_epsilon must be a number > 0, got {target_eps!r}")
         logical_b = reqs.get("dp_logical_batch_size")
-        if logical_b is not None and (not _is_int(logical_b) or logical_b < 1):
-            raise ValueError(f"dp_logical_batch_size must be an integer >= 1, got {logical_b!r}")
+        if not _is_int(logical_b) or logical_b < 1:
+            raise ValueError(f"dp_logical_batch_size is required for DP jobs and must be an integer >= 1, got {logical_b!r}")
 
     total = agg.get("total_rounds")
     if total is not None and (not _is_int(total) or total < 1):
