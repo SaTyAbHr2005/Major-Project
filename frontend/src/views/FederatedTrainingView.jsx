@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useFederationStore, COLLECTING } from '../stores/federationStore';
-import { Network, Plus, CheckCircle, RefreshCw, Play } from 'lucide-react';
+import { Network, Plus, CheckCircle, RefreshCw, Play, CheckCircle2, AlertTriangle, ShieldAlert, XCircle, Info } from 'lucide-react';
 import { useConfirm } from '../components/common/ConfirmDialog';
 import { Notice } from '../components/common/Notice';
 import { useAggregateRound } from '../components/federation/AggregateRoundDialog';
@@ -12,8 +12,15 @@ const FIELD_STYLE = { padding: '8px', background: 'var(--bg-nested)', color: '#f
 const planSummary = (job) => {
   const plan = job.plan || {};
   const agg = job.aggregation_configuration || {};
-  const parts = [plan.protocol === 'flower' ? 'Flower (automatic rounds)' : 'Manual rounds',
-    plan.strategy === 'fedprox' ? `FedProx (μ ${job.training_requirements?.proximal_mu})` : 'FedAvg'];
+  const strat = agg.strategy || plan.strategy || 'fedavg';
+  const stratLabel = strat === 'fedprox'
+    ? `FedProx (μ ${job.training_requirements?.proximal_mu})`
+    : strat === 'median'
+    ? 'Coordinate Median'
+    : strat === 'trimmed_mean'
+    ? `Trimmed Mean${agg.trim_ratio ? ` (trim ${agg.trim_ratio})` : ''}`
+    : 'FedAvg';
+  const parts = [plan.protocol === 'flower' ? 'Flower (automatic rounds)' : 'Manual rounds', stratLabel];
   parts.push(plan.total_rounds ? `${plan.rounds_completed} of ${plan.total_rounds} rounds done` : `${plan.rounds_completed ?? 0} round(s) done, open-ended`);
   if (plan.protocol === 'flower') parts.push(`${agg.round_duration_hours} h per round`);
   else if (plan.auto_continue) parts.push(`next round opens automatically (${agg.round_duration_hours} h)`);
@@ -139,8 +146,10 @@ export const FederatedTrainingView = () => {
     class_mapping_list: ['', ''], // dynamic list of class names
     minimum_participants: 2,
     protocol: 'flower',          // flower: the Flower server runs every planned round; manual: admin and hospitals act per round
+    strategy: 'fedavg',          // fedavg, median, or trimmed_mean (Module 12 robust aggregation)
+    trim_ratio: '0.1',           // for trimmed_mean
     // Round plan (Module 9): planned rounds, automatic next round, early stopping. Jobs created here use
-    // FedAvg; FedProx is a research setting (API and the Flower simulation bench), not an admin choice.
+    // FedAvg, Median, or Trimmed Mean; FedProx is a research setting (API and the Flower simulation bench).
     total_rounds: 3,             // empty = open-ended (manual rounds only): the admin opens every round
     round_duration_hours: 24,
     early_stop: false,
@@ -216,7 +225,10 @@ export const FederatedTrainingView = () => {
       }
       validClasses.forEach((name, idx) => { class_mapping[name] = idx; });
 
-      const aggregation_configuration = { strategy: 'fedavg', protocol: newJob.protocol };
+      const aggregation_configuration = { strategy: newJob.strategy || 'fedavg', protocol: newJob.protocol };
+      if (newJob.strategy === 'trimmed_mean' && newJob.trim_ratio) {
+        aggregation_configuration.trim_ratio = Number(newJob.trim_ratio);
+      }
       if (newJob.protocol === 'flower' && !newJob.total_rounds) throw new Error('Flower jobs need a total number of rounds.');
       if (newJob.total_rounds) {
         aggregation_configuration.total_rounds = Number(newJob.total_rounds);
@@ -456,18 +468,54 @@ export const FederatedTrainingView = () => {
                           </div>
                         </div>
 
+                        {round.aggregation_metadata?.fallback_reason && (
+                          <div style={{ marginTop: '8px', padding: '6px 10px', background: 'rgba(234, 179, 8, 0.1)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: '4px', fontSize: '11px', color: '#facc15', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <AlertTriangle size={13} style={{ flexShrink: 0 }} />
+                            <span><strong>Fallback to FedAvg:</strong> {round.aggregation_metadata.fallback_reason}</span>
+                          </div>
+                        )}
+
                         <div style={{ marginTop: '12px', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px' }}>
                           <h5 style={{ fontSize: '11px', color: '#94a3b8', marginBottom: '6px' }}>Participants ({round.received_participants.length})</h5>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                             {round.received_participants.map((pid, idx) => {
-                              const isAccepted = round.accepted_participants.includes(pid);
-                              const isRejected = round.rejected_participants.includes(pid);
+                              const update = (round.updates || []).find(u => u.participant_id === pid);
+                              const secStatus = update?.security_status;
+                              const isQuarantined = round.quarantined_participants?.includes(pid) || update?.status === 'QUARANTINED' || secStatus === 'QUARANTINE';
+                              const isRejected = round.rejected_participants?.includes(pid) || update?.status === 'REJECTED' || secStatus === 'REJECT';
+                              const isFlagged = secStatus === 'FLAG';
+                              const isAccepted = (round.accepted_participants?.includes(pid) || update?.status === 'ACCEPTED' || update?.status === 'USED_IN_AGGREGATION') && !isQuarantined && !isRejected;
+                              const reason = update?.security_reason || update?.rejection_reason;
+
                               return (
-                                <div key={idx} style={{ padding: '6px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', fontSize: '11px', display: 'flex', justifyContent: 'space-between' }}>
-                                  <span>{hospitalNames[pid] ? `${hospitalNames[pid]} (${pid})` : pid}</span>
-                                  {isAccepted ? <span style={{ color: 'var(--status-healthy)' }}>ACCEPTED ✓</span> : 
-                                   isRejected ? <span style={{ color: '#ef4444' }}>REJECTED / EXPIRED</span> : 
-                                   <span style={{ color: '#eab308' }}>WAITING</span>}
+                                <div key={idx} style={{ padding: '6px 8px', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontWeight: 500 }}>{hospitalNames[pid] ? `${hospitalNames[pid]} (${pid})` : pid}</span>
+                                    {isQuarantined ? (
+                                      <span style={{ color: '#f97316', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                                        <ShieldAlert size={12} /> QUARANTINED
+                                      </span>
+                                    ) : isRejected ? (
+                                      <span style={{ color: '#ef4444', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                                        <XCircle size={12} /> REJECTED
+                                      </span>
+                                    ) : isFlagged ? (
+                                      <span style={{ color: '#eab308', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                                        <AlertTriangle size={12} /> FLAGGED
+                                      </span>
+                                    ) : isAccepted ? (
+                                      <span style={{ color: 'var(--status-healthy)', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                                        <CheckCircle2 size={12} /> ACCEPTED
+                                      </span>
+                                    ) : (
+                                      <span style={{ color: 'var(--text-muted)' }}>WAITING</span>
+                                    )}
+                                  </div>
+                                  {reason && (
+                                    <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', wordBreak: 'break-word' }}>
+                                      {reason}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
@@ -568,6 +616,24 @@ export const FederatedTrainingView = () => {
                   <option value="manual">Manual rounds: you open and aggregate each round</option>
                 </select>
               </label>
+              <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                  Aggregation strategy
+                  <select style={{ ...FIELD_STYLE, width: '280px' }} value={newJob.strategy}
+                    onChange={e => setNewJob({ ...newJob, strategy: e.target.value })}>
+                    <option value="fedavg">FedAvg (sample-weighted average)</option>
+                    <option value="median">Coordinate Median (robust, needs ≥3 hospitals)</option>
+                    <option value="trimmed_mean">Trimmed Mean (trims outliers, needs ≥3 hospitals)</option>
+                  </select>
+                </label>
+                {newJob.strategy === 'trimmed_mean' && (
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Trim ratio (0.05 - 0.45)
+                    <input type="number" step="0.05" min="0.05" max="0.45" style={{ ...FIELD_STYLE, width: '130px' }}
+                      value={newJob.trim_ratio} onChange={e => setNewJob({ ...newJob, trim_ratio: e.target.value })} />
+                  </label>
+                )}
+              </div>
               <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
                   {newJob.protocol === 'flower' ? 'Total rounds' : 'Total rounds (empty = open-ended)'}

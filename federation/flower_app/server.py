@@ -228,7 +228,7 @@ class AppStrategy(fl.server.strategy.Strategy):
     def _aggregate_train(self, results, failures):
         self._round_over.set()
         rnd = self.round
-        intake = IntakeManager(self.storage, UpdateValidator(self.storage), M12SecurityHook(), self.events)
+        intake = IntakeManager(self.storage, UpdateValidator(self.storage), M12SecurityHook(storage=self.storage), self.events)
         incoming = os.path.join(self.storage.get_round_artifact_dir(self.job_id, rnd.round_id), "incoming")
         answered = set()
         for proxy, res in results:

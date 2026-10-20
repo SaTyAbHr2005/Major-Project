@@ -59,29 +59,68 @@ class Aggregator:
             if h.parameter_dtypes != ref_handoff.parameter_dtypes:
                 raise ValueError("Mismatch in parameter dtypes during aggregation.")
                 
-        # 2. Weighting Strategy: Sample-size weighting
+        # 2. Strategy resolution and fallback check
+        agg_config = job.aggregation_configuration or {}
+        requested_strategy = agg_config.get("strategy", "fedavg")
         total_samples = sum(h.num_train_samples for _, h in handoffs)
-        
+        k_participants = len(handoffs)
+
+        fallback_reason = None
+        if requested_strategy in ("median", "trimmed_mean") and k_participants < 3:
+            effective_strategy = "fedavg"
+            fallback_reason = (
+                f"Strategy '{requested_strategy}' requires at least 3 participants, "
+                f"but only {k_participants} were received. Fell back to weighted FedAvg."
+            )
+            self.event_emitter.emit(
+                FederationEvent.AGGREGATION_FALLBACK,
+                round_id=round_id,
+                requested_strategy=requested_strategy,
+                effective_strategy="fedavg",
+                reason=fallback_reason
+            )
+        else:
+            effective_strategy = requested_strategy
+
         aggregated_parameters = []
         
         # 3. Aggregation execution
+        trim_ratio = agg_config.get("trim_ratio")
+        if trim_ratio is not None:
+            trim_count = int(k_participants * float(trim_ratio))
+        else:
+            trim_count = 1  # default: trim 1 min and 1 max
+        if 2 * trim_count >= k_participants:
+            trim_count = max(0, (k_participants - 1) // 2)
+
         # Iterate over parameters
         for param_idx in range(ref_handoff.parameter_count):
             dtype_str = ref_handoff.parameter_dtypes[param_idx]
             is_float = dtype_str.startswith("float")
             
             if is_float:
-                # Weighted average for float parameters
-                avg_param = np.zeros(ref_handoff.parameter_shapes[param_idx], dtype=dtype_str)
                 for _, h in handoffs:
-                    weight = h.num_train_samples / total_samples
                     param_val = h.parameters[param_idx]
-                    
                     if np.isnan(param_val).any() or np.isinf(param_val).any():
                         raise ValueError(f"NaN or Inf found in parameter {param_idx} from client {h.client_id or 'unknown'}")
-                        
-                    avg_param += weight * param_val
-                aggregated_parameters.append(avg_param)
+
+                if effective_strategy == "median":
+                    stacked = np.stack([h.parameters[param_idx] for _, h in handoffs], axis=0)
+                    med_param = np.median(stacked, axis=0).astype(dtype_str)
+                    aggregated_parameters.append(med_param)
+                elif effective_strategy == "trimmed_mean":
+                    stacked = np.stack([h.parameters[param_idx] for _, h in handoffs], axis=0)
+                    sorted_stacked = np.sort(stacked, axis=0)
+                    trimmed = sorted_stacked[trim_count : k_participants - trim_count]
+                    tmean_param = np.mean(trimmed, axis=0).astype(dtype_str)
+                    aggregated_parameters.append(tmean_param)
+                else:
+                    # Weighted average for float parameters (FedAvg / FedProx)
+                    avg_param = np.zeros(ref_handoff.parameter_shapes[param_idx], dtype=dtype_str)
+                    for _, h in handoffs:
+                        weight = h.num_train_samples / total_samples
+                        avg_param += weight * h.parameters[param_idx]
+                    aggregated_parameters.append(avg_param)
             else:
                 # Non-float state explicit policy:
                 # For non-float PyTorch parameters (like num_batches_tracked in BatchNorm), 
@@ -136,6 +175,19 @@ class Aggregator:
         # Calculate size
         npz_size = os.path.getsize(os.path.join(artifact_dir, "handoff_parameters.npz"))
         
+        agg_meta = {
+            "total_samples": total_samples,
+            "non_float_policy": "first_participant",
+            "strategy": requested_strategy,
+            "effective_strategy": effective_strategy,
+            "proximal_mu": (job.training_requirements or {}).get("proximal_mu"),
+            "norm_type": "group" if is_dp_job(job) else "batch",
+        }
+        if fallback_reason:
+            agg_meta["fallback_reason"] = fallback_reason
+        if effective_strategy == "trimmed_mean":
+            agg_meta["trim_count"] = trim_count
+
         gm = GlobalModelVersion(
             global_model_id=global_model_id,
             task=job.task,
@@ -150,14 +202,8 @@ class Aggregator:
             federation_job_id=job.federation_job_id,
             round_id=round_id,
             source_update_ids=[u.update_id for u, _ in handoffs],
-            aggregation_method="weighted_fedavg",
-            # FedProx changes only the hospitals' local objective; the server average is the same.
-            aggregation_metadata={
-                "total_samples": total_samples, "non_float_policy": "first_participant",
-                "strategy": (job.aggregation_configuration or {}).get("strategy", "fedavg"),
-                "proximal_mu": (job.training_requirements or {}).get("proximal_mu"),
-                "norm_type": "group" if is_dp_job(job) else "batch",
-            },
+            aggregation_method=f"coordinate_{effective_strategy}" if effective_strategy in ("median", "trimmed_mean") else "weighted_fedavg",
+            aggregation_metadata=agg_meta,
             class_mapping=job.class_mapping,
             schema_hash=schema_hash,
             status=GlobalModelStatus.EVALUATION_PENDING

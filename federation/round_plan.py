@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from hospital_client.training.dp import is_dp_job
 
-STRATEGIES = ("fedavg", "fedprox")
+STRATEGIES = ("fedavg", "fedprox", "median", "trimmed_mean")
 PROTOCOLS = ("manual", "flower")
 EARLY_STOPPING_METRICS = ("accuracy", "f1")
 # Rounds that produced a global model.
@@ -60,12 +60,23 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
     strategy = agg.get("strategy", "fedavg")
     if strategy not in STRATEGIES:
         raise ValueError(f"strategy must be one of {list(STRATEGIES)}, got {strategy!r}")
+
+    if strategy == "trimmed_mean":
+        trim_r = agg.get("trim_ratio")
+        if trim_r is not None and (not _is_number(trim_r) or not (0 < trim_r < 0.5)):
+            raise ValueError(f"trim_ratio must be a number in (0, 0.5), got {trim_r!r}")
+    elif agg.get("trim_ratio") is not None:
+        raise ValueError("trim_ratio is only used with strategy 'trimmed_mean'.")
+
     mu = reqs.get("proximal_mu")
     if strategy == "fedprox":
         if not _is_number(mu) or mu <= 0:
             raise ValueError(f"FedProx needs training_requirements.proximal_mu > 0, got {mu!r}")
-    elif mu not in (None, 0, 0.0):
-        raise ValueError("proximal_mu is only used with strategy 'fedprox'.")
+    elif mu not in (None, 0, 0.0) and strategy not in ("median", "trimmed_mean"):
+        raise ValueError("proximal_mu is only used with strategy 'fedprox', 'median', or 'trimmed_mean'.")
+    elif mu is not None and mu > 0 and strategy in ("median", "trimmed_mean"):
+        if not _is_number(mu) or mu <= 0:
+            raise ValueError(f"proximal_mu must be a number > 0, got {mu!r}")
 
     if is_dp_job(reqs):
         if strategy == "fedprox" or mu not in (None, 0, 0.0):

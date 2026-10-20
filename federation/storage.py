@@ -140,6 +140,12 @@ class FederationStorage:
                 cursor.execute("ALTER TABLE global_model_versions ADD COLUMN schema_hash TEXT DEFAULT 'LEGACY'")
             except sqlite3.OperationalError:
                 pass
+            # Module 12 security updates migration
+            for column in ("security_status TEXT DEFAULT 'ACCEPT'", "security_reason TEXT DEFAULT ''", "security_metrics TEXT DEFAULT '{}'"):
+                try:
+                    cursor.execute(f"ALTER TABLE federation_updates ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass
             
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS evaluation_records (
@@ -321,43 +327,78 @@ class FederationStorage:
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('''
                 INSERT OR REPLACE INTO federation_updates 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (update_id, federation_job_id, round_id, participant_id, model_id,
+                 architecture, artifact_location, artifact_checksum, parameter_count,
+                 parameter_metadata, num_train_samples, training_configuration,
+                 validation_result, rejection_reason, status, received_at,
+                 validated_at, used_in_aggregation_at, security_status, security_reason, security_metrics)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 u.update_id, u.federation_job_id, u.round_id, u.participant_id, u.model_id,
                 u.architecture, u.artifact_location, u.artifact_checksum, u.parameter_count,
                 json.dumps(u.parameter_metadata), u.num_train_samples, json.dumps(u.training_configuration),
-                u.validation_result, u.rejection_reason, u.status.value, u.received_at, u.validated_at, u.used_in_aggregation_at
+                u.validation_result, u.rejection_reason, u.status.value, u.received_at, u.validated_at, u.used_in_aggregation_at,
+                getattr(u, "security_status", "ACCEPT"), getattr(u, "security_reason", ""),
+                json.dumps(getattr(u, "security_metrics", {}) or {})
             ))
 
     def get_update(self, update_id: str) -> Optional[FederationUpdate]:
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
             cursor = conn.execute('SELECT * FROM federation_updates WHERE update_id = ?', (update_id,))
             row = cursor.fetchone()
             if row:
+                keys = row.keys()
                 return FederationUpdate(
-                    update_id=row[0], federation_job_id=row[1], round_id=row[2], participant_id=row[3],
-                    model_id=row[4], architecture=row[5], artifact_location=row[6], artifact_checksum=row[7],
-                    parameter_count=row[8], parameter_metadata=json.loads(row[9]), num_train_samples=row[10],
-                    training_configuration=json.loads(row[11]), validation_result=row[12], rejection_reason=row[13],
-                    status=UpdateStatus(row[14]), received_at=row[15], validated_at=row[16], used_in_aggregation_at=row[17]
+                    update_id=row['update_id'], federation_job_id=row['federation_job_id'],
+                    round_id=row['round_id'], participant_id=row['participant_id'],
+                    model_id=row['model_id'], architecture=row['architecture'],
+                    artifact_location=row['artifact_location'], artifact_checksum=row['artifact_checksum'],
+                    parameter_count=row['parameter_count'],
+                    parameter_metadata=json.loads(row['parameter_metadata']),
+                    num_train_samples=row['num_train_samples'],
+                    training_configuration=json.loads(row['training_configuration']),
+                    validation_result=row['validation_result'],
+                    rejection_reason=row['rejection_reason'],
+                    security_status=row['security_status'] if 'security_status' in keys else "ACCEPT",
+                    security_reason=row['security_reason'] if 'security_reason' in keys else "",
+                    security_metrics=json.loads(row['security_metrics']) if 'security_metrics' in keys and row['security_metrics'] else {},
+                    status=UpdateStatus(row['status']),
+                    received_at=row['received_at'],
+                    validated_at=row['validated_at'],
+                    used_in_aggregation_at=row['used_in_aggregation_at']
                 )
         return None
 
     def list_updates_for_round(self, round_id: str, status: Optional[UpdateStatus] = None) -> List[FederationUpdate]:
         updates = []
         with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
             if status:
                 cursor = conn.execute('SELECT * FROM federation_updates WHERE round_id = ? AND status = ?', (round_id, status.value))
             else:
                 cursor = conn.execute('SELECT * FROM federation_updates WHERE round_id = ?', (round_id,))
             
             for row in cursor.fetchall():
+                keys = row.keys()
                 updates.append(FederationUpdate(
-                    update_id=row[0], federation_job_id=row[1], round_id=row[2], participant_id=row[3],
-                    model_id=row[4], architecture=row[5], artifact_location=row[6], artifact_checksum=row[7],
-                    parameter_count=row[8], parameter_metadata=json.loads(row[9]), num_train_samples=row[10],
-                    training_configuration=json.loads(row[11]), validation_result=row[12], rejection_reason=row[13],
-                    status=UpdateStatus(row[14]), received_at=row[15], validated_at=row[16], used_in_aggregation_at=row[17]
+                    update_id=row['update_id'], federation_job_id=row['federation_job_id'],
+                    round_id=row['round_id'], participant_id=row['participant_id'],
+                    model_id=row['model_id'], architecture=row['architecture'],
+                    artifact_location=row['artifact_location'], artifact_checksum=row['artifact_checksum'],
+                    parameter_count=row['parameter_count'],
+                    parameter_metadata=json.loads(row['parameter_metadata']),
+                    num_train_samples=row['num_train_samples'],
+                    training_configuration=json.loads(row['training_configuration']),
+                    validation_result=row['validation_result'],
+                    rejection_reason=row['rejection_reason'],
+                    security_status=row['security_status'] if 'security_status' in keys else "ACCEPT",
+                    security_reason=row['security_reason'] if 'security_reason' in keys else "",
+                    security_metrics=json.loads(row['security_metrics']) if 'security_metrics' in keys and row['security_metrics'] else {},
+                    status=UpdateStatus(row['status']),
+                    received_at=row['received_at'],
+                    validated_at=row['validated_at'],
+                    used_in_aggregation_at=row['used_in_aggregation_at']
                 ))
         return updates
 

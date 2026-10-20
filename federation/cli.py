@@ -72,7 +72,7 @@ def main():
         print(f"Created and opened round {args.round_id}")
         
     elif args.command == "submit-update":
-        intake = IntakeManager(storage, UpdateValidator(storage), M12SecurityHook(), events)
+        intake = IntakeManager(storage, UpdateValidator(storage), M12SecurityHook(storage=storage), events)
         update = intake.receive_handoff(args.job_id, args.round_id, args.participant_id, args.handoff_dir)
         print(f"Submitted update: {update.update_id} - status: {update.status}")
         

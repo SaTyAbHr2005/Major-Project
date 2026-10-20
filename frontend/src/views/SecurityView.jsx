@@ -78,8 +78,8 @@ export const SecurityView = () => {
                     <td className="font-mono">{u.architecture}</td>
                     <td className="font-mono">{u.num_train_samples}</td>
                     <td className="font-mono" title={u.artifact_checksum}>{u.artifact_checksum ? `${u.artifact_checksum.slice(0, 10)}...` : '-'}</td>
-                    <td><span className={statusBadge(u.status)}>{u.status}</span></td>
-                    <td style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '320px' }}>{u.rejection_reason || ''}</td>
+                    <td><span className={statusBadge(u.status)}>{u.status}{u.security_status && u.security_status !== 'OK' ? ` (${u.security_status})` : ''}</span></td>
+                    <td style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '320px' }}>{u.security_reason || u.rejection_reason || ''}</td>
                   </tr>
                 ))}
               </tbody>
@@ -89,11 +89,11 @@ export const SecurityView = () => {
       </div>
 
       <div className="card">
-        <div className="card-header"><span className="card-title">Not implemented yet</span></div>
+        <div className="card-header"><span className="card-title">Security & Privacy Implementation Status</span></div>
         <ul style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.6, paddingLeft: '18px', margin: 0 }}>
-          <li><strong>Byzantine / malicious update detection (Module 12):</strong> the security hook is in place but currently accepts every update that passes validation.</li>
-          <li><strong>Differential privacy (Module 10):</strong> updates are not noised; there is no privacy budget to report.</li>
-          <li><strong>Secure communication (Module 11):</strong> the local development setup uses plain HTTP.</li>
+          <li><strong>Byzantine / malicious update detection (Module 12):</strong> Active — per-update delta norm bound, cosine direction verification (rounds ≥ 3), sample-count consistency check, and coordinate-wise median / trimmed mean aggregation.</li>
+          <li><strong>Differential privacy (Module 10):</strong> Active — DP-SGD with Rényi privacy accounting, gradient clipping, and per-job cumulative budget enforcement.</li>
+          <li><strong>Secure communication (Module 11):</strong> Pending — local development setup uses plain HTTP; production requires TLS/HTTPS termination.</li>
         </ul>
       </div>
     </div>

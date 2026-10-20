@@ -98,26 +98,46 @@ class IntakeManager:
             return update
             
         # 2. Security validation (M12 hook)
-        security_decision = self.security_hook.evaluate_update(update, handoff)
-        if security_decision == "REJECT":
+        try:
+            security_decision = self.security_hook.evaluate_update(update, handoff, job=job, rnd=rnd)
+        except TypeError:
+            security_decision = self.security_hook.evaluate_update(update, handoff)
+        verdict = security_decision.verdict if hasattr(security_decision, "verdict") else str(security_decision)
+        reasons_str = "; ".join(security_decision.reasons) if hasattr(security_decision, "reasons") and security_decision.reasons else ""
+        metrics_dict = getattr(security_decision, "metrics", {}) or {}
+
+        update.security_status = verdict
+        update.security_reason = reasons_str
+        update.security_metrics = metrics_dict
+
+        if verdict == "REJECT":
             update.status = UpdateStatus.REJECTED
-            update.rejection_reason = "Rejected by M12 Security Hook"
+            update.rejection_reason = reasons_str or "Rejected by M12 Security Hook"
             self.storage.save_update(update)
             if participant_id not in rnd.rejected_participants:
                 rnd.rejected_participants.append(participant_id)
                 self.storage.save_round(rnd)
             self.event_emitter.emit(FederationEvent.UPDATE_REJECTED, update_id=update.update_id, reason=update.rejection_reason)
             return update
-        elif security_decision == "QUARANTINE":
-            update.status = UpdateStatus.QUARANTINE
-            update.rejection_reason = "Quarantined by M12 Security Hook"
+        elif verdict == "QUARANTINE":
+            update.status = UpdateStatus.QUARANTINED
+            update.rejection_reason = reasons_str or "Quarantined by M12 Security Hook"
             self.storage.save_update(update)
             if participant_id not in rnd.quarantined_participants:
                 rnd.quarantined_participants.append(participant_id)
                 self.storage.save_round(rnd)
-            self.event_emitter.emit(FederationEvent.UPDATE_QUARANTINED, update_id=update.update_id)
+            self.event_emitter.emit(FederationEvent.UPDATE_QUARANTINED, update_id=update.update_id, reason=update.rejection_reason)
             return update
-            
+        elif verdict == "FLAG":
+            self.event_emitter.emit(
+                FederationEvent.UPDATE_FLAGGED,
+                update_id=update.update_id,
+                participant_id=participant_id,
+                round_id=round_id,
+                reason=reasons_str,
+                metrics=metrics_dict
+            )
+
         # 3. Accepted
         # Move artifact to secure storage
         dest_dir = os.path.join(self.storage.get_round_artifact_dir(federation_job_id, round_id), update_id)

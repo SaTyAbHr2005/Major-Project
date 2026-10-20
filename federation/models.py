@@ -124,6 +124,9 @@ class FederationUpdate:
     training_configuration: Dict[str, Any]
     validation_result: str = ""
     rejection_reason: str = ""
+    security_status: str = "ACCEPT"
+    security_reason: str = ""
+    security_metrics: Dict[str, Any] = field(default_factory=dict)
     status: UpdateStatus = UpdateStatus.RECEIVED
     received_at: str = field(default_factory=now_iso)
     validated_at: Optional[str] = None

@@ -55,6 +55,15 @@ def get_job_rounds(storage, job_id):
             r['accepted_participants'] = json.loads(r['accepted_participants'])
             r['rejected_participants'] = json.loads(r['rejected_participants'])
             r['quarantined_participants'] = json.loads(r['quarantined_participants'])
+            cur.execute("SELECT aggregation_metadata FROM global_model_versions WHERE round_id = ?", (r['round_id'],))
+            gm_row = cur.fetchone()
+            if gm_row and gm_row['aggregation_metadata']:
+                try:
+                    r['aggregation_metadata'] = json.loads(gm_row['aggregation_metadata'])
+                except Exception:
+                    r['aggregation_metadata'] = None
+            else:
+                r['aggregation_metadata'] = None
             rounds.append(r)
         return rounds
 
@@ -73,6 +82,11 @@ def get_round_updates(storage, round_id):
                 u['training_configuration'] = json.loads(u['training_configuration'])
             if u['validation_result']:
                 u['validation_result'] = json.loads(u['validation_result'])
+            if u.get('security_metrics') and isinstance(u['security_metrics'], str):
+                try:
+                    u['security_metrics'] = json.loads(u['security_metrics'])
+                except Exception:
+                    pass
             updates.append(u)
         return updates
 
@@ -311,6 +325,8 @@ def main():
             jobs = get_all_jobs(storage)
             for j in jobs:
                 j['rounds'] = get_job_rounds(storage, j['federation_job_id'])
+                for r in j['rounds']:
+                    r['updates'] = get_round_updates(storage, r['round_id'])
                 j['plan'] = job_plan(storage, j)
                 j['participants'] = job_participants(storage, j['federation_job_id'])
                 j['dp'] = job_dp(storage, j)
@@ -477,7 +493,7 @@ def main():
             from federation.intake import IntakeManager
             from federation.validation import UpdateValidator
             from federation.security_hooks import M12SecurityHook
-            im = IntakeManager(storage, UpdateValidator(storage), M12SecurityHook(), events)
+            im = IntakeManager(storage, UpdateValidator(storage), M12SecurityHook(storage=storage), events)
             try:
                 update = im.receive_handoff(job_id, round_id, participant_id, handoff_dir)
                 print(json.dumps({"success": True, "update": update}, cls=EnhancedJSONEncoder))
