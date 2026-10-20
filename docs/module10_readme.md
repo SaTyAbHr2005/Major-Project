@@ -1,8 +1,9 @@
 ﻿# Module 10 — Differential Privacy (DP-SGD)
 
-> **Status**: Implemented and tested (25 automated tests, plus a real two-hospital run on the
-> malaria dataset; see [Verification](#verification)). DP is configured per job through the
-> federation API or the admin job-creation form.
+> **Status**: Completed. Implemented and tested (25 automated tests, plus a real two-hospital run
+> on the malaria dataset; see [Verification](#verification)). DP is configured per job through the
+> federation API or the admin job-creation form. Known limitations are listed below; the items that
+> need further work are collected under [Future Work](#future-work).
 
 ---
 
@@ -248,7 +249,9 @@ python -m hospital_client.resource_training \
 
 7. **Per-image, not per-patient, guarantee.** See item 8 under "What DP Does Not Protect Against".
 
-8. **Accuracy cost not yet measured.** A non-DP run with the same data, model and epochs is needed before the accuracy cost of DP can be stated.
+8. **No same-architecture non-DP baseline.** The DP vs non-DP comparison below uses a non-DP ResNet-18 job, not a non-DP MobileNetV3-Small job, so it is indicative only.
+
+9. **Noise cannot be verified by the server.** DP noise is applied automatically by the hospital-side client, using parameters fixed by the admin at job creation; hospital users cannot change or disable it. The guarantee assumes the hospital runs the unmodified client software. The server checks that the reported DP parameters match the job, but cannot verify from the model weights alone that noise was added, because training runs on the hospital's machine.
 
 ---
 
@@ -296,4 +299,48 @@ Evaluation of the resulting global models on the admin evaluation set `EVAL-MALA
 | GM-MALARIA-MOBILENET_V3_SMALL-V3 | 2 | 0.9567 | 0.9570 | 0.9384 | 0.9751 |
 
 These are experimental results on a public demonstration dataset, not a clinical evaluation.
-The privacy guarantee is per cell image, not per patient (see item 8 above).
+The privacy guarantee is per cell image, not per patient (see item 8 under "What DP Does Not Protect Against").
+
+### Comparison with a non-DP job
+
+Baseline: job `JOB_MAL_RES18_CLS2_V2`, ResNet-18 without DP, run on 16 Oct 2026 with the same two
+hospitals (32,567 training images in total), FedAvg over Flower, 2 rounds, 10 local epochs per round,
+evaluated on the same `EVAL-MALARIA` set.
+
+| | Non-DP (ResNet-18) | DP (MobileNetV3-Small, σ = 1.0) |
+|---|---|---|
+| Accuracy after round 1 | 0.9610 (GM-MALARIA-RESNET18-V2) | 0.9404 (GM-MALARIA-MOBILENET_V3_SMALL-V2) |
+| Accuracy after round 2 | 0.9614 (GM-MALARIA-RESNET18-V3) | 0.9567 (GM-MALARIA-MOBILENET_V3_SMALL-V3) |
+| F1 after round 2 | 0.9614 | 0.9570 |
+| Recall Parasitized after round 2 | 0.9649 | 0.9384 |
+| Recall Uninfected after round 2 | 0.9579 | 0.9751 |
+| Privacy spent after round 2 | none (no DP guarantee) | ε = 3.147 (HOSP_999999), ε = 4.909 (HOSP_888888), δ = 10⁻⁵ |
+
+Observations:
+
+- After round 1 the DP model is 2.1 points behind; after round 2 the gap is 0.5 points.
+- The DP model misses more Parasitized cells (recall 0.938 vs 0.965), i.e. more false negatives on
+  the infected class, while recognising Uninfected cells slightly better.
+
+This comparison is indicative, not a controlled measurement of the cost of DP. The two jobs differ in
+more than DP: architecture (ResNet-18 has roughly 11M parameters, MobileNetV3-Small roughly 1.5M) and
+normalisation (non-DP jobs use BatchNorm, DP jobs must use GroupNorm). A controlled measurement needs
+a non-DP MobileNetV3-Small job with the same settings (see Future Work).
+
+---
+
+## Future Work
+
+1. **Controlled DP vs non-DP comparison.** Run a non-DP MobileNetV3-Small job with the same hospitals,
+   rounds and epochs, so that architecture is not a confounding factor. Normalisation would still
+   differ (BatchNorm vs GroupNorm) unless non-DP jobs are allowed to use GroupNorm.
+2. **Membership-inference audit.** Measure empirically, with and without DP, how well an attacker can
+   tell whether an image was in the training set. This tests the effect of DP on the trained model,
+   in addition to the accounting.
+3. **Patient-level privacy.** Sample and clip per patient instead of per image, so that ε bounds what
+   is revealed about a whole patient. Opacus does not provide this directly.
+4. **Verifying that noise was added.** Trusted hardware with remote attestation (for example Intel
+   TDX, AMD SEV, or GPU confidential computing) or cryptographic proofs of training would let the
+   server verify the hospital ran the unmodified DP code. Neither is practical on the current hardware.
+5. **Encryption in transit.** Module 11 (TLS) is required so that noised updates are not readable on
+   the network.
