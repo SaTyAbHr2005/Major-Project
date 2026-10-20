@@ -1,0 +1,48 @@
+{
+  "model_id": "GM-MALARIA-RESNET18-V2",
+  "version": 1,
+  "architecture": "resnet18",
+  "config": {
+    "architecture": "resnet18",
+    "num_classes": 2,
+    "input_size": [
+      224,
+      224
+    ],
+    "color_mode": "RGB",
+    "pretrained": false,
+    "dropout": null
+  },
+  "status": "trained",
+  "artifact_sha256": "5a489f789521a7b624e9033bf135deee5060cefed29777adb847824bc4324b91",
+  "artifact_size_bytes": 44759464,
+  "framework_versions": {
+    "torch": "2.14.0+cu126",
+    "torchvision": "0.29.0+cu126",
+    "safetensors": "0.8.0"
+  },
+  "input_spec": {
+    "input_size": [
+      224,
+      224
+    ],
+    "color_mode": "RGB"
+  },
+  "num_classes": 2,
+  "class_mapping": {},
+  "preprocessing_reference": null,
+  "task_type": null,
+  "preprocessing_spec": null,
+  "dataset_profile_reference": null,
+  "training_reference": null,
+  "parent_version": null,
+  "total_parameters": 11177538,
+  "trainable_parameters": 11177538,
+  "epochs": null,
+  "optimizer": null,
+  "learning_rate": null,
+  "random_seed": null,
+  "created_at": "2026-10-16T15:07:07.547797+00:00",
+  "notes": "",
+  "warnings": []
+}

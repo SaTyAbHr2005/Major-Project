@@ -1,0 +1,51 @@
+{
+  "model_id": "GM-MALARIA-MOBILENET_V2-V1",
+  "version": 1,
+  "architecture": "mobilenet_v2",
+  "config": {
+    "architecture": "mobilenet_v2",
+    "num_classes": 2,
+    "input_size": [
+      224,
+      224
+    ],
+    "color_mode": "RGB",
+    "pretrained": false,
+    "dropout": null
+  },
+  "status": "available",
+  "artifact_sha256": "78f8eebf1f9e90d4ebf45b5a694fca7e8d2f8327072a5730222e8e1c1c4b55bb",
+  "artifact_size_bytes": 9072008,
+  "framework_versions": {
+    "torch": "2.14.0+cu126",
+    "torchvision": "0.29.0+cu126",
+    "safetensors": "0.8.0"
+  },
+  "input_spec": {
+    "input_size": [
+      224,
+      224
+    ],
+    "color_mode": "RGB"
+  },
+  "num_classes": 2,
+  "class_mapping": {
+    "Parasitized": 0,
+    "Uninfected": 1
+  },
+  "preprocessing_reference": null,
+  "task_type": null,
+  "preprocessing_spec": null,
+  "dataset_profile_reference": null,
+  "training_reference": null,
+  "parent_version": null,
+  "total_parameters": 2226434,
+  "trainable_parameters": 2226434,
+  "epochs": null,
+  "optimizer": null,
+  "learning_rate": null,
+  "random_seed": null,
+  "created_at": "2026-10-15T17:55:57.838857+00:00",
+  "notes": "",
+  "warnings": []
+}

@@ -1,0 +1,887 @@
+{
+  "protocol_version": 1,
+  "model_id": "FED_JOB_MAL_MNV3_CLS2_V2_20261020_115029",
+  "model_version": 2,
+  "architecture": "mobilenet_v3_small",
+  "parameter_count": 142,
+  "parameter_shapes": [
+    [
+      16,
+      3,
+      3,
+      3
+    ],
+    [
+      16
+    ],
+    [
+      16
+    ],
+    [
+      16,
+      1,
+      3,
+      3
+    ],
+    [
+      16
+    ],
+    [
+      16
+    ],
+    [
+      8,
+      16,
+      1,
+      1
+    ],
+    [
+      8
+    ],
+    [
+      16,
+      8,
+      1,
+      1
+    ],
+    [
+      16
+    ],
+    [
+      16,
+      16,
+      1,
+      1
+    ],
+    [
+      16
+    ],
+    [
+      16
+    ],
+    [
+      72,
+      16,
+      1,
+      1
+    ],
+    [
+      72
+    ],
+    [
+      72
+    ],
+    [
+      72,
+      1,
+      3,
+      3
+    ],
+    [
+      72
+    ],
+    [
+      72
+    ],
+    [
+      24,
+      72,
+      1,
+      1
+    ],
+    [
+      24
+    ],
+    [
+      24
+    ],
+    [
+      88,
+      24,
+      1,
+      1
+    ],
+    [
+      88
+    ],
+    [
+      88
+    ],
+    [
+      88,
+      1,
+      3,
+      3
+    ],
+    [
+      88
+    ],
+    [
+      88
+    ],
+    [
+      24,
+      88,
+      1,
+      1
+    ],
+    [
+      24
+    ],
+    [
+      24
+    ],
+    [
+      96,
+      24,
+      1,
+      1
+    ],
+    [
+      96
+    ],
+    [
+      96
+    ],
+    [
+      96,
+      1,
+      5,
+      5
+    ],
+    [
+      96
+    ],
+    [
+      96
+    ],
+    [
+      24,
+      96,
+      1,
+      1
+    ],
+    [
+      24
+    ],
+    [
+      96,
+      24,
+      1,
+      1
+    ],
+    [
+      96
+    ],
+    [
+      40,
+      96,
+      1,
+      1
+    ],
+    [
+      40
+    ],
+    [
+      40
+    ],
+    [
+      240,
+      40,
+      1,
+      1
+    ],
+    [
+      240
+    ],
+    [
+      240
+    ],
+    [
+      240,
+      1,
+      5,
+      5
+    ],
+    [
+      240
+    ],
+    [
+      240
+    ],
+    [
+      64,
+      240,
+      1,
+      1
+    ],
+    [
+      64
+    ],
+    [
+      240,
+      64,
+      1,
+      1
+    ],
+    [
+      240
+    ],
+    [
+      40,
+      240,
+      1,
+      1
+    ],
+    [
+      40
+    ],
+    [
+      40
+    ],
+    [
+      240,
+      40,
+      1,
+      1
+    ],
+    [
+      240
+    ],
+    [
+      240
+    ],
+    [
+      240,
+      1,
+      5,
+      5
+    ],
+    [
+      240
+    ],
+    [
+      240
+    ],
+    [
+      64,
+      240,
+      1,
+      1
+    ],
+    [
+      64
+    ],
+    [
+      240,
+      64,
+      1,
+      1
+    ],
+    [
+      240
+    ],
+    [
+      40,
+      240,
+      1,
+      1
+    ],
+    [
+      40
+    ],
+    [
+      40
+    ],
+    [
+      120,
+      40,
+      1,
+      1
+    ],
+    [
+      120
+    ],
+    [
+      120
+    ],
+    [
+      120,
+      1,
+      5,
+      5
+    ],
+    [
+      120
+    ],
+    [
+      120
+    ],
+    [
+      32,
+      120,
+      1,
+      1
+    ],
+    [
+      32
+    ],
+    [
+      120,
+      32,
+      1,
+      1
+    ],
+    [
+      120
+    ],
+    [
+      48,
+      120,
+      1,
+      1
+    ],
+    [
+      48
+    ],
+    [
+      48
+    ],
+    [
+      144,
+      48,
+      1,
+      1
+    ],
+    [
+      144
+    ],
+    [
+      144
+    ],
+    [
+      144,
+      1,
+      5,
+      5
+    ],
+    [
+      144
+    ],
+    [
+      144
+    ],
+    [
+      40,
+      144,
+      1,
+      1
+    ],
+    [
+      40
+    ],
+    [
+      144,
+      40,
+      1,
+      1
+    ],
+    [
+      144
+    ],
+    [
+      48,
+      144,
+      1,
+      1
+    ],
+    [
+      48
+    ],
+    [
+      48
+    ],
+    [
+      288,
+      48,
+      1,
+      1
+    ],
+    [
+      288
+    ],
+    [
+      288
+    ],
+    [
+      288,
+      1,
+      5,
+      5
+    ],
+    [
+      288
+    ],
+    [
+      288
+    ],
+    [
+      72,
+      288,
+      1,
+      1
+    ],
+    [
+      72
+    ],
+    [
+      288,
+      72,
+      1,
+      1
+    ],
+    [
+      288
+    ],
+    [
+      96,
+      288,
+      1,
+      1
+    ],
+    [
+      96
+    ],
+    [
+      96
+    ],
+    [
+      576,
+      96,
+      1,
+      1
+    ],
+    [
+      576
+    ],
+    [
+      576
+    ],
+    [
+      576,
+      1,
+      5,
+      5
+    ],
+    [
+      576
+    ],
+    [
+      576
+    ],
+    [
+      144,
+      576,
+      1,
+      1
+    ],
+    [
+      144
+    ],
+    [
+      576,
+      144,
+      1,
+      1
+    ],
+    [
+      576
+    ],
+    [
+      96,
+      576,
+      1,
+      1
+    ],
+    [
+      96
+    ],
+    [
+      96
+    ],
+    [
+      576,
+      96,
+      1,
+      1
+    ],
+    [
+      576
+    ],
+    [
+      576
+    ],
+    [
+      576,
+      1,
+      5,
+      5
+    ],
+    [
+      576
+    ],
+    [
+      576
+    ],
+    [
+      144,
+      576,
+      1,
+      1
+    ],
+    [
+      144
+    ],
+    [
+      576,
+      144,
+      1,
+      1
+    ],
+    [
+      576
+    ],
+    [
+      96,
+      576,
+      1,
+      1
+    ],
+    [
+      96
+    ],
+    [
+      96
+    ],
+    [
+      576,
+      96,
+      1,
+      1
+    ],
+    [
+      576
+    ],
+    [
+      576
+    ],
+    [
+      1024,
+      576
+    ],
+    [
+      1024
+    ],
+    [
+      2,
+      1024
+    ],
+    [
+      2
+    ]
+  ],
+  "parameter_dtypes": [
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32"
+  ],
+  "parameters_checksum": "ad2e892d7888ed91c3dc6623a7fd3a4bbf636bacda8a9160c2d6c425a3790427",
+  "base_model_id": "GM-MALARIA-MOBILENET_V3_SMALL-V2",
+  "base_model_version": 1,
+  "base_model_checksum": "d7ddaa76e025970b93df1b5693a5489f9062b9ac907e5592dfbbbcadc43a06bc",
+  "num_train_samples": 22046,
+  "num_classes": 2,
+  "class_mapping": {
+    "Parasitized": 0,
+    "Uninfected": 1
+  },
+  "training_metrics": {
+    "loss": 0.23150075681704324,
+    "accuracy": 0.9628755842421545,
+    "precision": 0.9630348340993856,
+    "recall": 0.9629041238665905,
+    "f1": 0.9628737244569585,
+    "per_class": {
+      "Parasitized": {
+        "precision": 0.9723756906077348,
+        "recall": 0.953040390590324,
+        "f1": 0.9626109566932664,
+        "support": 11265
+      },
+      "Uninfected": {
+        "precision": 0.9536939775910365,
+        "recall": 0.9727678571428572,
+        "f1": 0.9631364922206507,
+        "support": 11200
+      }
+    },
+    "confusion_matrix": [
+      [
+        10736,
+        529
+      ],
+      [
+        305,
+        10895
+      ]
+    ],
+    "class_order": [
+      "Parasitized",
+      "Uninfected"
+    ],
+    "sample_count": 22046
+  },
+  "validation_metrics": {
+    "loss": 0.2591104975278325,
+    "accuracy": 0.9619013062409288,
+    "precision": 0.9621994784099778,
+    "recall": 0.961901306240929,
+    "f1": 0.961895160732817,
+    "per_class": {
+      "Parasitized": {
+        "precision": 0.9739389426656738,
+        "recall": 0.9492017416545718,
+        "f1": 0.9614112458654906,
+        "support": 1378
+      },
+      "Uninfected": {
+        "precision": 0.9504600141542817,
+        "recall": 0.974600870827286,
+        "f1": 0.9623790756001434,
+        "support": 1378
+      }
+    },
+    "confusion_matrix": [
+      [
+        1308,
+        70
+      ],
+      [
+        35,
+        1343
+      ]
+    ],
+    "class_order": [
+      "Parasitized",
+      "Uninfected"
+    ],
+    "sample_count": 2756
+  },
+  "training_configuration": {
+    "model_id": "FED_JOB_MAL_MNV3_CLS2_V2_20261020_115029",
+    "model_config": {
+      "architecture": "mobilenet_v3_small",
+      "num_classes": 2,
+      "input_size": [
+        224,
+        224
+      ],
+      "color_mode": "RGB",
+      "pretrained": false,
+      "dropout": null,
+      "norm_type": "group"
+    },
+    "require_validation": true,
+    "run_test_evaluation": true,
+    "device": "cuda",
+    "precision": "fp32",
+    "epochs": 10,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "optimizer": "adam",
+    "momentum": 0.9,
+    "scheduler": null,
+    "scheduler_patience": 2,
+    "scheduler_factor": 0.5,
+    "scheduler_step_size": 10,
+    "scheduler_gamma": 0.1,
+    "scheduler_t_max": null,
+    "scheduler_eta_min": 0.0,
+    "early_stopping": false,
+    "early_stopping_metric": "val_loss",
+    "early_stopping_patience": 5,
+    "early_stopping_mode": "min",
+    "class_weighting": "none",
+    "num_workers": 4,
+    "pin_memory": false,
+    "random_seed": 42,
+    "resume": false,
+    "validate_every": 1,
+    "canonical_class_mapping": {
+      "Parasitized": 0,
+      "Uninfected": 1
+    },
+    "federation_job_architecture": "mobilenet_v3_small",
+    "canonical_base_model_id": "GM-MALARIA-MOBILENET_V3_SMALL-V2",
+    "canonical_base_model_version": 1,
+    "canonical_base_model_checksum": "d7ddaa76e025970b93df1b5693a5489f9062b9ac907e5592dfbbbcadc43a06bc",
+    "proximal_mu": 0.0,
+    "dp_enabled": true,
+    "dp_noise_multiplier": 1.0,
+    "dp_max_grad_norm": 1.0,
+    "dp_target_delta": 1e-05,
+    "dp_target_epsilon": 5.0,
+    "dp_logical_batch_size": 256,
+    "dp_state_job_id": "JOB_MAL_MNV3_CLS2_V2",
+    "dp_sample_rate": 0.01161208382473011,
+    "dp_steps": 870,
+    "dp_epsilon": 2.2981102050911795,
+    "dp_cumulative_epsilon": 3.1467315621034104
+  },
+  "device": "cuda",
+  "precision": "fp32",
+  "status": "TRAINING_COMPLETED_AWAITING_FEDERATION",
+  "round_id": "JOB_MAL_MNV3_CLS2_V2_R2",
+  "client_id": null,
+  "generated_at": "2026-10-20T07:13:06.869796+00:00"
+}

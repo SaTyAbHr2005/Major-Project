@@ -1,0 +1,659 @@
+{
+  "protocol_version": 1,
+  "model_id": "FED_JOB_MAL_RES18_CLS2_V1_20261009_004722",
+  "model_version": 4,
+  "architecture": "resnet18",
+  "parameter_count": 122,
+  "parameter_shapes": [
+    [
+      64,
+      3,
+      7,
+      7
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [],
+    [
+      64,
+      64,
+      3,
+      3
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [],
+    [
+      64,
+      64,
+      3,
+      3
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [],
+    [
+      64,
+      64,
+      3,
+      3
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [],
+    [
+      64,
+      64,
+      3,
+      3
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [
+      64
+    ],
+    [],
+    [
+      128,
+      64,
+      3,
+      3
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [],
+    [
+      128,
+      128,
+      3,
+      3
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [],
+    [
+      128,
+      64,
+      1,
+      1
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [],
+    [
+      128,
+      128,
+      3,
+      3
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [],
+    [
+      128,
+      128,
+      3,
+      3
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [
+      128
+    ],
+    [],
+    [
+      256,
+      128,
+      3,
+      3
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [],
+    [
+      256,
+      256,
+      3,
+      3
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [],
+    [
+      256,
+      128,
+      1,
+      1
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [],
+    [
+      256,
+      256,
+      3,
+      3
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [],
+    [
+      256,
+      256,
+      3,
+      3
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [
+      256
+    ],
+    [],
+    [
+      512,
+      256,
+      3,
+      3
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [],
+    [
+      512,
+      512,
+      3,
+      3
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [],
+    [
+      512,
+      256,
+      1,
+      1
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [],
+    [
+      512,
+      512,
+      3,
+      3
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [],
+    [
+      512,
+      512,
+      3,
+      3
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [
+      512
+    ],
+    [],
+    [
+      2,
+      512
+    ],
+    [
+      2
+    ]
+  ],
+  "parameter_dtypes": [
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "float32",
+    "int64",
+    "float32",
+    "float32"
+  ],
+  "parameters_checksum": "cca2ba0f18b6bef9def03defbfdb10e8fcdebc87baf8d2511d9a82970ebe8305",
+  "base_model_id": "SEED_JOB_MAL_RES18_CLS2_V1",
+  "base_model_version": 1,
+  "base_model_checksum": "5d6bc3051962f801b719374e77a693b2aefa44cc4a81658f7100517e28f24856",
+  "num_train_samples": 10521,
+  "num_classes": 2,
+  "class_mapping": {
+    "Parasitized": 0,
+    "Uninfected": 1
+  },
+  "training_metrics": {
+    "loss": 0.11723575630703162,
+    "accuracy": 0.9588442163292463,
+    "precision": 0.9592962569023822,
+    "recall": 0.9588309331460017,
+    "f1": 0.958833213868804,
+    "per_class": {
+      "Parasitized": {
+        "precision": 0.9734930296485372,
+        "recall": 0.943302891933029,
+        "f1": 0.958160208715818,
+        "support": 5256
+      },
+      "Uninfected": {
+        "precision": 0.945099484156227,
+        "recall": 0.9743589743589743,
+        "f1": 0.95950621902179,
+        "support": 5265
+      }
+    },
+    "confusion_matrix": [
+      [
+        4958,
+        298
+      ],
+      [
+        135,
+        5130
+      ]
+    ],
+    "class_order": [
+      "Parasitized",
+      "Uninfected"
+    ],
+    "sample_count": 10521
+  },
+  "validation_metrics": {
+    "loss": 0.15109211048925783,
+    "accuracy": 0.9513307984790874,
+    "precision": 0.951345612014046,
+    "recall": 0.9513330835102913,
+    "f1": 0.9513305451719161,
+    "per_class": {
+      "Parasitized": {
+        "precision": 0.9485627836611196,
+        "recall": 0.954337899543379,
+        "f1": 0.9514415781487102,
+        "support": 657
+      },
+      "Uninfected": {
+        "precision": 0.9541284403669725,
+        "recall": 0.9483282674772037,
+        "f1": 0.9512195121951219,
+        "support": 658
+      }
+    },
+    "confusion_matrix": [
+      [
+        627,
+        30
+      ],
+      [
+        34,
+        624
+      ]
+    ],
+    "class_order": [
+      "Parasitized",
+      "Uninfected"
+    ],
+    "sample_count": 1315
+  },
+  "training_configuration": {
+    "model_id": "FED_JOB_MAL_RES18_CLS2_V1_20261009_004722",
+    "model_config": {
+      "architecture": "resnet18",
+      "num_classes": 2,
+      "input_size": [
+        224,
+        224
+      ],
+      "color_mode": "RGB",
+      "pretrained": false,
+      "dropout": null
+    },
+    "dataset_dir": "C:\\Users\\SATYARANJAN\\medfl_ml_work\\HOSP_868720\\federation_runs\\JOB_MAL_RES18_CLS2_V1\\run_5ec6d729",
+    "require_validation": true,
+    "run_test_evaluation": true,
+    "output_dir": "C:\\Users\\SATYARANJAN\\medfl_ml_work\\HOSP_868720\\trained\\resnet18",
+    "device": "cuda",
+    "precision": "fp16",
+    "epochs": 10,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0,
+    "optimizer": "adam",
+    "momentum": 0.9,
+    "scheduler": null,
+    "scheduler_patience": 2,
+    "scheduler_factor": 0.5,
+    "scheduler_step_size": 10,
+    "scheduler_gamma": 0.1,
+    "scheduler_t_max": null,
+    "scheduler_eta_min": 0.0,
+    "early_stopping": false,
+    "early_stopping_metric": "val_loss",
+    "early_stopping_patience": 5,
+    "early_stopping_mode": "min",
+    "class_weighting": "none",
+    "num_workers": 4,
+    "pin_memory": false,
+    "random_seed": 42,
+    "resume": false,
+    "validate_every": 1,
+    "canonical_class_mapping": {
+      "Parasitized": 0,
+      "Uninfected": 1
+    },
+    "federation_job_architecture": "resnet18",
+    "canonical_base_model_id": "SEED_JOB_MAL_RES18_CLS2_V1",
+    "canonical_base_model_version": 1,
+    "canonical_base_model_checksum": "5d6bc3051962f801b719374e77a693b2aefa44cc4a81658f7100517e28f24856"
+  },
+  "device": "cuda",
+  "precision": "fp16",
+  "status": "TRAINING_COMPLETED_AWAITING_FEDERATION",
+  "round_id": "JOB_MAL_RES18_CLS2_V1_R1",
+  "client_id": null,
+  "generated_at": "2026-10-08T19:32:53.496434+00:00"
+}
