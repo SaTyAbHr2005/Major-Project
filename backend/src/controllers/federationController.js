@@ -66,6 +66,7 @@ exports.listJobs = async (req, res) => {
       (result.jobs || []).forEach((j) => {
         j.my_participation = (j.participants || []).find((p) => p.hospital_identifier === req.user.hospital_id) || null;
         delete j.participants;
+        if (j.dp) j.dp.spent = j.dp.spent?.[req.user.hospital_id] ? { [req.user.hospital_id]: j.dp.spent[req.user.hospital_id] } : {};
       });
     }
     // Flower jobs carry their server's run status (hospital apps connect when it is running).

@@ -48,8 +48,9 @@ const PrivacyNotice = ({ compact = false }) => {
         </div>
         <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
           Raw scans stay on this machine: Module 4 inspection, Module 5 preprocessing and local training run here
-          without uploading images. Federated learning (Module 9) sends model parameter updates and summary metrics;
-          differential privacy (Module 10) is not implemented yet, so those updates are not noise-protected.
+          without uploading images. Federated learning (Module 9) sends model parameter updates and summary metrics.
+          Differential privacy (Module 10) is chosen per job: in a DP job this machine trains with DP-SGD (clipped,
+          noised gradients) and its privacy cost ε is tracked; in other jobs updates are sent without noise.
         </p>
       </div>
     </div>

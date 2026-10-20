@@ -168,6 +168,24 @@ def job_plan(storage, job):
     return plan
 
 
+def job_dp(storage, job):
+    """A DP job's settings and each hospital's privacy spend so far (from the server's ledger), or None."""
+    from hospital_client.training.dp import is_dp_job
+    reqs = job.get("training_requirements") or {}
+    if not is_dp_job(reqs):
+        return None
+    spent = {}
+    for row in storage.get_dp_ledger(job["federation_job_id"]):   # oldest first: the last row holds the running total
+        entry = spent.setdefault(row["participant_id"], {"rounds": 0})
+        entry["rounds"] += 1
+        entry["epsilon"] = row["cumulative_epsilon"]
+    return {
+        "noise_multiplier": reqs.get("dp_noise_multiplier"), "max_grad_norm": reqs.get("dp_max_grad_norm"),
+        "delta": reqs.get("dp_target_delta"), "epsilon_cap": reqs.get("dp_target_epsilon"),
+        "logical_batch_size": reqs.get("dp_logical_batch_size"), "spent": spent,
+    }
+
+
 def job_participants(storage, job_id):
     """Join requests of a job (dicts), including hospitals approved before requests existed."""
     job = storage.get_job(job_id)
@@ -295,6 +313,7 @@ def main():
                 j['rounds'] = get_job_rounds(storage, j['federation_job_id'])
                 j['plan'] = job_plan(storage, j)
                 j['participants'] = job_participants(storage, j['federation_job_id'])
+                j['dp'] = job_dp(storage, j)
             print(json.dumps({"success": True, "jobs": jobs}, cls=EnhancedJSONEncoder))
             
         elif action == "get_job_details":

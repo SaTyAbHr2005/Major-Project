@@ -12,6 +12,7 @@ export const TopNav = () => {
   const isAdmin = useAuthStore(selectRole) === 'admin';
   const jobs = useFederationStore((s) => s.jobs.data);
   const loadJobs = useFederationStore((s) => s.loadJobs);
+  const dpJobs = (jobs || []).filter((j) => j.dp && !['ARCHIVED', 'COMPLETED'].includes(j.status) && !j.plan?.finished);
   const myRequests = useRequestsStore((s) => s.myRequests.data);
   const loadMyRequests = useRequestsStore((s) => s.loadMyRequests);
   const notificationsCount = useMockStore((s) => s.notificationsCount);
@@ -54,9 +55,16 @@ export const TopNav = () => {
 
       {/* Right Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <span className="badge badge-neutral" title="Module 10 (differential privacy) is not implemented: model updates are sent without DP noise.">
-          <Shield size={11} /> Differential privacy: not enabled
-        </span>
+        {/* Differential privacy is chosen per job; the badge reflects the jobs still running. */}
+        {dpJobs.length > 0 ? (
+          <span className="badge badge-healthy" title={`DP-SGD is on for: ${dpJobs.map((j) => j.federation_job_id).join(', ')}. Updates from these jobs are noise-protected; other jobs' updates are not.`}>
+            <Shield size={11} /> Differential privacy: on for {dpJobs.length} job{dpJobs.length === 1 ? '' : 's'}
+          </span>
+        ) : (
+          <span className="badge badge-neutral" title="Differential privacy is set per job when the job is created. No running job uses it, so current updates are sent without DP noise.">
+            <Shield size={11} /> Differential privacy: off
+          </span>
+        )}
 
         {/* Action Icons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

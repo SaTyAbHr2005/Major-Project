@@ -18,7 +18,40 @@ const planSummary = (job) => {
   if (plan.protocol === 'flower') parts.push(`${agg.round_duration_hours} h per round`);
   else if (plan.auto_continue) parts.push(`next round opens automatically (${agg.round_duration_hours} h)`);
   if (plan.early_stopping) parts.push(`early stopping on ${plan.early_stopping.metric || 'accuracy'} (+${plan.early_stopping.min_delta ?? 0}, ${plan.early_stopping.patience} round(s))`);
+  if (job.dp) parts.push(`differential privacy (DP-SGD, noise σ ${job.dp.noise_multiplier}, clip C ${job.dp.max_grad_norm}, batch ${job.dp.logical_batch_size})`);
   return parts.join(' · ');
+};
+
+/** A DP job's privacy budget: each hospital's epsilon spent so far (server ledger) against the job's cap. */
+const DPBudget = ({ dp, hospitalNames }) => {
+  const cap = Number(dp.epsilon_cap);
+  const rows = Object.entries(dp.spent || {});
+  return (
+    <div style={{ marginBottom: '12px', padding: '10px 12px', borderRadius: '4px', border: '1px solid rgba(59,130,246,0.35)', background: 'rgba(59,130,246,0.06)' }}>
+      <div style={{ fontSize: '12px', color: '#fff', marginBottom: '6px' }}>
+        Privacy budget <span style={{ color: 'var(--text-muted)' }}>(ε at δ = {dp.delta}{cap ? `, cap ε ${cap}` : ''})</span>
+      </div>
+      {rows.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No DP training round accepted yet.</div>}
+      {rows.map(([hid, s]) => {
+        const pct = cap ? Math.min(100, (s.epsilon / cap) * 100) : 0;
+        return (
+          <div key={hid} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px, 200px) 1fr auto', gap: '10px', alignItems: 'center', fontSize: '12px', marginTop: '4px' }}>
+            <span style={{ color: 'var(--text-secondary)' }}>{hospitalNames?.[hid] || hid}</span>
+            <div style={{ height: '6px', borderRadius: '3px', background: 'rgba(148,163,184,0.15)', overflow: 'hidden' }} aria-hidden="true">
+              <div style={{ height: '100%', width: `${pct}%`, background: pct > 90 ? '#ef4444' : '#3b82f6' }} />
+            </div>
+            <span style={{ color: '#fff', fontVariantNumeric: 'tabular-nums' }}>
+              ε {s.epsilon.toFixed(2)}{cap ? ` of ${cap}` : ''} · {s.rounds} round{s.rounds === 1 ? '' : 's'}
+            </span>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px', lineHeight: 1.5 }}>
+        Each hospital trains with DP-SGD; ε is the cumulative cost over all its accepted rounds, recomputed by the server.
+        A hospital is refused once another round would exceed the cap.
+      </div>
+    </div>
+  );
 };
 
 const STATUS_COLOR = { PENDING: '#eab308', APPROVED: 'var(--status-healthy)', REJECTED: '#ef4444' };
@@ -114,6 +147,15 @@ export const FederatedTrainingView = () => {
     es_metric: 'accuracy',
     es_min_delta: 0.005,
     es_patience: 2,
+    // Differential privacy (Module 10): DP-SGD at every hospital. The job fixes the noise, clipping, delta,
+    // logical batch and the epsilon cap; each hospital's spend is tracked by the server.
+    dp_enabled: false,
+    dp_noise_multiplier: 1.0,
+    dp_max_grad_norm: 1.0,
+    dp_target_delta: 0.00001,
+    dp_target_epsilon: 5,
+    dp_logical_batch_size: 256,
+    dp_epochs: 3,                // local epochs per round: epsilon grows with every step, so the admin fixes them
   });
 
   // Open-round form: one job at a time; the deadline input is local time.
@@ -193,6 +235,15 @@ export const FederatedTrainingView = () => {
         minimum_participants: newJob.minimum_participants,
         class_mapping,
         aggregation_configuration,
+        training_requirements: newJob.dp_enabled ? {
+          dp_enabled: true,
+          dp_noise_multiplier: Number(newJob.dp_noise_multiplier),
+          dp_max_grad_norm: Number(newJob.dp_max_grad_norm),
+          dp_target_delta: Number(newJob.dp_target_delta),
+          dp_target_epsilon: Number(newJob.dp_target_epsilon),
+          dp_logical_batch_size: Number(newJob.dp_logical_batch_size),
+          epochs: Number(newJob.dp_epochs),
+        } : {},
       });
       setShowCreateForm(false);
       setMessage({ tone: 'success', text: `Federation job ${newJob.job_id} created.` });
@@ -309,6 +360,7 @@ export const FederatedTrainingView = () => {
               <div style={{ marginBottom: '10px', fontSize: '12px', color: 'var(--text-secondary)' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Training plan: </span>{planSummary(job)}
               </div>
+              {job.dp && <DPBudget dp={job.dp} hospitalNames={hospitalNames} />}
               {readOnly ? (
                 <Notice tone="info" style={{ marginBottom: '12px' }}>
                   Archived: this job is read-only. Its rounds, hospitals and global models are kept for the record;
@@ -559,6 +611,40 @@ export const FederatedTrainingView = () => {
                 until the total is reached; hospitals get the number of hours you set (field shown once a total is entered) to send
                 their update. Early stopping evaluates each new global model on the server's evaluation dataset.
                 Updates are combined with FedAvg (average weighted by each hospital's number of training images).
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', background: 'rgba(255,255,255,0.02)', padding: '12px', borderRadius: '4px', border: '1px solid var(--border-subtle)' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#fff', fontWeight: 'bold' }}>
+                <input type="checkbox" checked={newJob.dp_enabled} onChange={e => setNewJob({...newJob, dp_enabled: e.target.checked})} />
+                Differential privacy (DP-SGD at every hospital)
+              </label>
+              {newJob.dp_enabled && (
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                  {[
+                    ['dp_noise_multiplier', 'Noise multiplier σ', '0.01', '0.01'],
+                    ['dp_max_grad_norm', 'Clipping norm C', '0.01', '0.01'],
+                    ['dp_target_delta', 'δ', 'any', '0.0000001'],
+                    ['dp_target_epsilon', 'ε cap (whole job)', '0.1', '0.1'],
+                    ['dp_logical_batch_size', 'Logical batch size', '1', '1'],
+                    ['dp_epochs', 'Local epochs per round', '1', '1'],
+                  ].map(([key, label, step, min]) => (
+                    <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                      {label}
+                      <input type="number" step={step} min={min} required style={{ ...FIELD_STYLE, width: '130px' }}
+                        value={newJob[key]} onChange={e => setNewJob({...newJob, [key]: e.target.value})} />
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                {newJob.dp_enabled
+                  ? "Each hospital clips every image's gradient to C and adds noise σ·C before each step, so no single training image "
+                    + 'noticeably changes its update. ε measures the privacy cost (lower is more private) and grows with every round; '
+                    + 'a hospital is refused once another round would exceed the cap, so more epochs or rounds cost more ε. '
+                    + 'δ should be below 1 / (number of training images). '
+                    + 'DP models use GroupNorm and train in full precision, so they train slower and usually reach lower accuracy.'
+                  : 'Off: hospitals send their trained weights without noise.'}
               </div>
             </div>
 

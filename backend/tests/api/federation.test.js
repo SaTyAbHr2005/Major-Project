@@ -325,6 +325,21 @@ describe('GET /api/v1/federation/jobs', () => {
     expect(res.body.jobs[0].my_participation).toMatchObject({ hospital_identifier: 'HOSP-BETA', authorization_status: 'PENDING' });
   });
 
+  test('A hospital sees only its own DP privacy spend, never other hospitals\'', async () => {
+    adapterReturns({ success: true, jobs: [{ federation_job_id: 'JOB_DP', rounds: [], participants: [], dp: {
+      epsilon_cap: 5, spent: { 'HOSP-ALPHA': { rounds: 2, epsilon: 1.9 }, 'HOSP-BETA': { rounds: 1, epsilon: 2.3 } },
+    } }] });
+    const beta = await request(app).get('/api/v1/federation/jobs').set('Authorization', `Bearer ${HOSP_BETA()}`);
+    expect(beta.body.jobs[0].dp.spent).toEqual({ 'HOSP-BETA': { rounds: 1, epsilon: 2.3 } });
+    expect(beta.body.jobs[0].dp.epsilon_cap).toBe(5);
+
+    adapterReturns({ success: true, jobs: [{ federation_job_id: 'JOB_DP', rounds: [], participants: [], dp: {
+      epsilon_cap: 5, spent: { 'HOSP-ALPHA': { rounds: 2, epsilon: 1.9 } },
+    } }] });
+    const notYet = await request(app).get('/api/v1/federation/jobs').set('Authorization', `Bearer ${HOSP_BETA()}`);
+    expect(notYet.body.jobs[0].dp.spent).toEqual({});
+  });
+
   test('Hospital with no request gets my_participation = null', async () => {
     adapterReturns({ success: true, jobs: [{ federation_job_id: 'JOB1', rounds: [], participants: [
       { hospital_identifier: 'HOSP-BETA', authorization_status: 'PENDING', eligibility: {} },
