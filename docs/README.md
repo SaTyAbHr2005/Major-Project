@@ -62,7 +62,7 @@ Where they disagree with the module docs, the module docs and the code are curre
 | 7 | Local training | Implemented | One PyTorch trainer for every architecture, metrics, plots, federation handoff |
 | 8 | Resource-aware training | Implemented | Hardware detection, per-model memory/time estimates with a real dry run, recommendations, OOM retry |
 | 9 | Federated learning | Implemented (jobs run through Flower in the app; manual rounds and a Flower simulation bench also available) | Jobs, join requests with admin approval (hospital sends its local eligibility summary), rounds, base-model distribution, update validation, weighted FedAvg, FedProx, round plan (total rounds, early stopping, automatic next round), global models, evaluation, promotion; Start federation runs the job through a Flower server per job (`federation/flower_app`) with live status on the admin and hospital screens; `python -m federation.flower_sim` runs Flower with N simulated hospitals (IID / label-skew) |
-| 10 | Differential privacy | Implemented (API; UI deferred) | Opacus DP-SGD with Poisson sampling, per-sample gradient clipping, Gaussian noise addition, BatchMemoryManager for physical batching, RDP accountant over full round history stored in database ledger, pre-training privacy budget checks, GroupNorm model conversion, and single-exchange Flower rounds without BatchNorm calibration |
+| 10 | Differential privacy | Implemented and tested (API and admin form) | Opacus DP-SGD with Poisson sampling, per-sample gradient clipping, Gaussian noise addition, BatchMemoryManager for physical batching, RDP accountant over full round history stored in database ledger, pre-training privacy budget checks, GroupNorm model conversion, and single-exchange Flower rounds without BatchNorm calibration |
 | 11 | Secure communication | Not implemented | Local services use plain HTTP on localhost; no TLS/mTLS |
 | 12 | Byzantine/malicious update detection | Not implemented | Module 9 has a hook that currently accepts every update |
 | 13 | Monitoring & telemetry | Partial | Training progress, Module 8 hardware measurements, admin hospital telemetry |
@@ -328,7 +328,8 @@ aggregates each round by hand.
 6. **Result:** a new global model version (status `EVALUATION_PENDING`). The admin can evaluate it
    and promote it. The next round starts from it.
 
-Not implemented: differential privacy (Module 10), TLS (Module 11), malicious-update detection
+DP jobs train with DP-SGD and the server keeps a privacy ledger (Module 10, see
+[module10_readme.md](module10_readme.md)). Not implemented: TLS (Module 11), malicious-update detection
 (Module 12, hook accepts everything). Details: [module9_readme.md](module9_readme.md).
 
 ---
@@ -339,7 +340,9 @@ Not implemented: differential privacy (Module 10), TLS (Module 11), malicious-up
   folder path). Flower jobs send the weights over the Flower connection instead; for hospitals on other
   machines, set `FLOWER_PUBLIC_HOST` to the server's address. So far this has only been run with
   everything on one machine.
-- No TLS, no differential privacy, no Byzantine defence.
+- No TLS, no Byzantine defence.
+- Differential privacy protects individual training images, not whole patients, and assumes hospitals
+  apply the configured noise honestly. See [module10_readme.md](module10_readme.md).
 - Module 5's grouped split keeps patients/lesions together but does not stratify by class. Check
   the per-split class counts in the report.
 - Images are not mean/std-normalised, and models train from scratch. Fine for experiments, but

@@ -288,8 +288,9 @@ Local ML service environment variables (all optional):
 
 | Implemented and tested | Partial | Not implemented yet |
 |---|---|---|
-| Modules 1-3 (auth, researcher desktop, hospital desktop; a few screens are marked mock) | 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests | 10 differential privacy, 11 secure communication (TLS), 12 malicious-update detection |
+| Modules 1-3 (auth, researcher desktop, hospital desktop; a few screens are marked mock) | 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests | 11 secure communication (TLS), 12 malicious-update detection |
 | Modules 4-8, 16 (hospital-side ML pipeline) | | 17 mobile app, 20 experiments, 21 packaging |
+| 10 differential privacy (DP-SGD, privacy accounting and budget, see [docs/module10_readme.md](docs/module10_readme.md)) | | |
 | Module 9 federated learning (custom central protocol, not Flower) | | |
 
 Full per-module status: `docs/README.md` section 2.

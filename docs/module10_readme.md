@@ -1,7 +1,8 @@
 ﻿# Module 10 — Differential Privacy (DP-SGD)
 
-> **Status**: Implemented. Configuration is via the federation API.
-> The hospital UI settings panel for DP is deferred to a future module.
+> **Status**: Implemented and tested (25 automated tests, plus a real two-hospital run on the
+> malaria dataset; see [Verification](#verification)). DP is configured per job through the
+> federation API or the admin job-creation form.
 
 ---
 
@@ -64,7 +65,11 @@ One row per accepted update, per hospital, per round:
 
 `storage.compute_cumulative_dp_epsilon(job_id, participant_id, delta)` recomputes ε from the full history at any time without relying on the stored `cumulative_epsilon` field.
 
-### Hospital-side state (`dp_state_<model_id>.json`)
+### Hospital-side state (`dp_state.json`)
+
+In federated runs the file is `<ML_WORK_DIR>/<hospital_id>/federation_runs/<job_id>/dp_state.json`
+(default `ML_WORK_DIR` is `~/medfl_ml_work`). Standalone training without `--dp-state-path` writes
+`dp_state_<model_id>.json` in the output directory instead.
 
 ```json
 {
@@ -131,7 +136,7 @@ Naive per-round addition (not used) would give 5.4432 and 5.2142 respectively.
 
 ## What DP Does Not Protect Against
 
-1. **Model inversion / gradient inversion on the update itself.** Opacus adds noise to gradients before the update leaves the hospital. A sufficiently powerful server may still attempt to reconstruct training images from the noised gradient update. Module 11 (encryption in transit) prevents the update being read in transit; Module 12 (Byzantine / malicious-update detection) addresses adversarial updates from participants, but neither provides reconstruction resistance. There is no planned secure aggregation module.
+1. **Model inversion / gradient inversion on the update itself.** Opacus adds noise to gradients before the update leaves the hospital. A sufficiently powerful server may still attempt to reconstruct training images from the noised gradient update. Module 11 (encryption in transit, planned, not implemented yet) would prevent the update being read in transit; Module 12 (Byzantine / malicious-update detection) addresses adversarial updates from participants, but neither provides reconstruction resistance. There is no planned secure aggregation module.
 
 2. **Membership inference from the model by an observer who sees per-round model snapshots.** The (ε, δ) guarantee is over the entire published sequence; a model published after each round is covered. However, an observer who can query the model and accumulate signal across many rounds can mount practical membership inference attacks even within the DP guarantee — ε=3 does not mean an attack is infeasible.
 
@@ -144,6 +149,8 @@ Naive per-round addition (not used) would give 5.4432 and 5.2142 respectively.
 6. **Privacy of the validation and test sets.** DP-SGD applies only to the training data loader. Validation accuracy, per-class metrics returned in the handoff, and test scores computed during evaluation are outside the DP budget.
 
 7. **Class counts, image counts, and eligibility summaries in join requests.** The join-request eligibility payload (class counts per label, total image count, validation metrics) is sent in the clear as part of the participation request. This information is not protected by the DP guarantee and operators should treat it as potentially identifying.
+
+8. **Patient-level privacy.** The guarantee is per training image (neighbouring datasets differ in one image). A patient who contributes k images is protected only at the group level, which is substantially weaker than (ε, δ) for k > 1 (roughly kε, with a correspondingly larger δ). In the malaria dataset each patient contributes many cell images, so ε must not be read as a per-patient bound.
 
 ---
 
@@ -192,7 +199,7 @@ GroupNorm has no running mean/var, so calibrating batch statistics would be both
 
 ## Configuration (API)
 
-DP is configured through the federation API at job creation time. The hospital UI settings panel for DP is **deferred** — hospitals receive DP configuration from the server via the round invitation.
+DP is configured at job creation time, through the federation API or the admin job-creation form (DP toggle with σ, C, δ, ε cap, logical batch size and epochs). Hospitals do not choose DP settings: they receive them from the server via the round invitation. The federated training screen shows each DP job's settings and the ε spent per hospital (hospital users see only their own hospital's spend), and the top bar shows how many jobs have DP on.
 
 ### Example job creation payload
 
@@ -227,7 +234,7 @@ python -m hospital_client.resource_training \
 
 ## Known Limitations
 
-1. **No secure aggregation is planned.** Noised updates are sent in plaintext to the server. Module 11 encrypts the transport layer. Module 12 detects adversarial updates. Neither provides cryptographic aggregation hiding individual updates from the server.
+1. **No secure aggregation is planned.** Noised updates are sent in plaintext to the server. Module 11 (planned, not implemented yet) would encrypt the transport layer, so updates currently travel unencrypted. Module 12 (planned) would detect adversarial updates. Neither provides cryptographic aggregation hiding individual updates from the server.
 
 2. **Single-machine DP only.** Opacus `DistributedDPOptimizer` (multi-GPU / multi-process) is not supported. Each hospital must train on a single process.
 
@@ -239,4 +246,54 @@ python -m hospital_client.resource_training \
 
 6. **Epsilon reporting tolerance is 1e-3.** A gap > 1e-3 between reported and recomputed ε causes rejection. This accommodates floating-point rounding differences across OS and BLAS versions.
 
-7. **UI deferred.** DP configuration is API-only. Hospitals cannot set DP parameters through the web UI.
+7. **Per-image, not per-patient, guarantee.** See item 8 under "What DP Does Not Protect Against".
+
+8. **Accuracy cost not yet measured.** A non-DP run with the same data, model and epochs is needed before the accuracy cost of DP can be stated.
+
+---
+
+## Verification
+
+### Automated tests
+
+```bash
+python -m pytest hospital_client/training/tests/test_dp_training.py federation/tests/test_dp_federation.py federation/tests/test_dp_job_summary.py -q
+```
+
+Result (20 Oct 2026): `25 passed`. Covered: pre-training budget refusal, DP training and accounting,
+physical-batch adaptation, multi-round state persistence, FedProx and non-FP32 refusal, multi-round
+ledger composition, exactly-once ledger charging over Flower, server rejection of updates with DP
+disabled or mismatched σ, C, δ, ε, q or precision, round-plan validation, and the per-job DP summary.
+
+### Real federated run: malaria dataset (20 Oct 2026)
+
+Job `JOB_MAL_MNV3_CLS2_V2`: MobileNetV3-Small (GroupNorm, FP32), 2 classes (Parasitized,
+Uninfected), FedAvg over Flower, 2 rounds, 2 hospitals. DP settings: σ = 1.0, C = 1.0,
+δ = 10⁻⁵, ε cap = 5, logical batch B = 256, 10 local epochs per round.
+
+| Hospital | Training images N | q = B/N | Steps/round | ε round 1 | ε after round 2 (RDP composed) | Projected after round 3 |
+|---|---|---|---|---|---|---|
+| HOSP_999999 | 22,046 | 0.01161 | 870 | 2.298 | 3.147 | 3.855 (allowed) |
+| HOSP_888888 | 10,521 | 0.02433 | 420 | 3.563 | 4.909 | 6.018 (would be refused) |
+
+δ = 10⁻⁵ is below 1/N for both hospitals. The smaller hospital spends more ε per round because
+each image has a higher chance of being sampled (larger q).
+
+Checks performed:
+
+- HOSP_999999's `dp_state.json` and the server's `federation_dp_ledger` contain the same σ, q,
+  steps, δ and ε values.
+- Every ε in the ledger was recomputed independently with Opacus `RDPAccountant` from (σ, q, steps, δ)
+  and matched to full float precision.
+- The ledger has exactly one row per hospital per round.
+
+Evaluation of the resulting global models on the admin evaluation set `EVAL-MALARIA`
+(2,333 images: 1,168 Parasitized, 1,165 Uninfected):
+
+| Global model | After round | Accuracy | F1 | Recall Parasitized | Recall Uninfected |
+|---|---|---|---|---|---|
+| GM-MALARIA-MOBILENET_V3_SMALL-V2 | 1 | 0.9404 | 0.9413 | 0.9084 | 0.9725 |
+| GM-MALARIA-MOBILENET_V3_SMALL-V3 | 2 | 0.9567 | 0.9570 | 0.9384 | 0.9751 |
+
+These are experimental results on a public demonstration dataset, not a clinical evaluation.
+The privacy guarantee is per cell image, not per patient (see item 8 above).
