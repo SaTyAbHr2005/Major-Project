@@ -72,11 +72,8 @@ def validate_plan(aggregation_configuration: Dict[str, Any], training_requiremen
     if strategy == "fedprox":
         if not _is_number(mu) or mu <= 0:
             raise ValueError(f"FedProx needs training_requirements.proximal_mu > 0, got {mu!r}")
-    elif mu not in (None, 0, 0.0) and strategy not in ("median", "trimmed_mean"):
-        raise ValueError("proximal_mu is only used with strategy 'fedprox', 'median', or 'trimmed_mean'.")
-    elif mu is not None and mu > 0 and strategy in ("median", "trimmed_mean"):
-        if not _is_number(mu) or mu <= 0:
-            raise ValueError(f"proximal_mu must be a number > 0, got {mu!r}")
+    elif mu not in (None, 0, 0.0):
+        raise ValueError("proximal_mu is only used with strategy 'fedprox'.")
 
     if is_dp_job(reqs):
         if strategy == "fedprox" or mu not in (None, 0, 0.0):

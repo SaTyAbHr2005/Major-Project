@@ -211,22 +211,73 @@ class TestM12SecurityAndRobustAggregation(unittest.TestCase):
 
         u_norm = make_update(update_id="u1", federation_job_id="JOB_NORM", round_id="R1", participant_id="H1")
 
-        # Case A: Normal delta (ratio ~ 1.0) -> ACCEPT
+        # Case A: Normal delta (ratio = 0.1 < 2.2) -> ACCEPT
         p_normal = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 0.1]
         dec_normal = self.hook.evaluate_update(u_norm, make_handoff(p_normal), job, rnd)
         self.assertEqual(dec_normal.verdict, "ACCEPT")
 
-        # Case B: Scaled delta (ratio = 20.0 > 15.0) -> FLAG
-        p_flag = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 20.0]
+        # Case B: Scaled delta (ratio = 3.0 > 2.2 flag threshold) -> FLAG
+        p_flag = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 3.0]
         dec_flag = self.hook.evaluate_update(u_norm, make_handoff(p_flag), job, rnd)
         self.assertEqual(dec_flag.verdict, "FLAG")
         self.assertTrue(any("exceeds flag threshold" in r for r in dec_flag.reasons))
 
-        # Case C: Extreme delta (ratio = 60.0 > 50.0) -> QUARANTINE
-        p_quar = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 60.0]
+        # Case C: Extreme delta (ratio = 8.0 > 5.5 quarantine threshold) -> QUARANTINE
+        p_quar = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 8.0]
         dec_quar = self.hook.evaluate_update(u_norm, make_handoff(p_quar), job, rnd)
         self.assertEqual(dec_quar.verdict, "QUARANTINE")
         self.assertTrue(any("exceeds quarantine threshold" in r for r in dec_quar.reasons))
+
+    def test_3x_scaled_non_dp_update_is_flagged(self):
+        """
+        A non-DP update whose delta is scaled by 3x exceeds the calibrated flag threshold (2.2) and is FLAGGED.
+        Baseline clean non-DP delta ratio is ~0.9 (within observed clean range <= 1.1031).
+        When scaled 3x, ratio becomes 2.7 (> 2.2 flag threshold).
+        """
+        job = FederationJob(
+            federation_job_id="JOB_3X_SCALED",
+            task="malaria",
+            task_type="image_classification",
+            architecture="mobilenet",
+            num_classes=2,
+            class_mapping={},
+            expected_participants=["H1"],
+            minimum_participants=1,
+            deadline="",
+            training_requirements={},
+            aggregation_configuration={},
+        )
+        rnd = FederationRound(
+            round_id="R1",
+            federation_job_id="JOB_3X_SCALED",
+            round_number=1,
+            expected_participants=["H1"],
+            minimum_participants=1,
+            deadline="",
+            base_model_id="GM1",
+            base_model_version=1,
+            base_model_checksum="abc",
+        )
+        base_p = [np.ones((10, 10), dtype=np.float32)]  # norm = 10.0
+        base_dir = self.storage.get_global_model_dir(job.task, job.architecture, rnd.base_model_version)
+        make_handoff(base_p).save(base_dir)
+
+        u = make_update(update_id="u1", federation_job_id="JOB_3X_SCALED", round_id="R1", participant_id="H1")
+
+        # Clean update with ratio 0.9 (norm = 9.0) -> ACCEPT (< 2.2)
+        clean_delta = np.ones((10, 10), dtype=np.float32) * 0.9
+        p_clean = [base_p[0] + clean_delta]
+        dec_clean = self.hook.evaluate_update(u, make_handoff(p_clean), job, rnd)
+        self.assertEqual(dec_clean.verdict, "ACCEPT")
+        self.assertAlmostEqual(dec_clean.metrics["delta_to_base_ratio"], 0.9, places=3)
+
+        # 3x scaled delta -> delta norm 27.0, ratio 2.7 (> 2.2 flag threshold, < 5.5 quarantine) -> FLAG
+        scaled_delta = clean_delta * 3.0
+        p_scaled = [base_p[0] + scaled_delta]
+        dec_scaled = self.hook.evaluate_update(u, make_handoff(p_scaled), job, rnd)
+        self.assertEqual(dec_scaled.verdict, "FLAG")
+        self.assertAlmostEqual(dec_scaled.metrics["delta_to_base_ratio"], 2.7, places=3)
+        self.assertTrue(any("exceeds flag threshold" in r for r in dec_scaled.reasons))
 
     def test_delta_norm_job_overrides(self):
         """Job training_requirements can override L2 norm thresholds explicitly."""
@@ -312,16 +363,16 @@ class TestM12SecurityAndRobustAggregation(unittest.TestCase):
 
         u = make_update(update_id="u1", federation_job_id="JOB_DP_NORM", round_id="R1", participant_id="H1")
 
-        # Ratio = 0.5 (clean DP update) -> ACCEPT
-        p_ok = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 0.5]
+        # Ratio = 0.1 (clean DP update, < 0.4 flag threshold) -> ACCEPT
+        p_ok = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 0.1]
         self.assertEqual(self.hook.evaluate_update(u, make_handoff(p_ok), job, rnd).verdict, "ACCEPT")
 
-        # Ratio = 3.0 (> DP default 2.0) -> FLAG
-        p_flag = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 3.0]
+        # Ratio = 0.6 (> DP default 0.4 flag threshold, < 1.0 quarantine) -> FLAG
+        p_flag = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 0.6]
         self.assertEqual(self.hook.evaluate_update(u, make_handoff(p_flag), job, rnd).verdict, "FLAG")
 
-        # Ratio = 12.0 (> DP default 10.0) -> QUARANTINE
-        p_quar = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 12.0]
+        # Ratio = 1.5 (> DP default 1.0 quarantine threshold) -> QUARANTINE
+        p_quar = [base_p[0] + np.ones((10, 10), dtype=np.float32) * 1.5]
         self.assertEqual(self.hook.evaluate_update(u, make_handoff(p_quar), job, rnd).verdict, "QUARANTINE")
 
     # ── 4. Cosine Direction Check (Rounds >= 3) ───────────────────────────────
@@ -596,8 +647,8 @@ class TestM12SecurityAndRobustAggregation(unittest.TestCase):
         from safetensors.numpy import save_file
         save_file({"param_0": base_p[0]}, os.path.join(base_dir, "model.safetensors"))
 
-        # Create an update that triggers FLAG (ratio ~ 20.0 > 15.0)
-        p_flag = [base_p[0] + np.ones((4, 4), dtype=np.float32) * 20.0]
+        # Create an update that triggers FLAG (ratio ~ 3.0 > 2.2 flag threshold, < 5.5 quarantine)
+        p_flag = [base_p[0] + np.ones((4, 4), dtype=np.float32) * 3.0]
         update_dir = os.path.join(self.temp_dir, "upload_flag")
         make_handoff(
             p_flag, base_model_id="BASE1", base_model_version=1, base_model_checksum=base_chk
@@ -910,9 +961,9 @@ class TestM12SecurityAndRobustAggregation(unittest.TestCase):
         validate_plan({"strategy": "median"}, {})
         # Valid trimmed_mean
         validate_plan({"strategy": "trimmed_mean", "trim_ratio": 0.2}, {})
-        validate_plan({"strategy": "trimmed_mean"}, {})  # default trim_ratio
-        # Valid with FedProx
-        validate_plan({"strategy": "median"}, {"proximal_mu": 0.01})
+        # Invalid with non-FedProx (proximal_mu only with fedprox)
+        with self.assertRaises(ValueError):
+            validate_plan({"strategy": "median"}, {"proximal_mu": 0.01})
         # Valid with Differential Privacy
         validate_plan(
             {"strategy": "trimmed_mean", "trim_ratio": 0.15},
@@ -1017,6 +1068,68 @@ class TestM12SecurityAndRobustAggregation(unittest.TestCase):
         self.assertEqual(calibrated[0][0], 20.0)
         # running_mean averaged across accepted hospitals: (1.0 + 3.0) / 2 = 2.0 (H_Bad excluded)
         self.assertEqual(calibrated[1][0], 2.0)
+
+    def test_skipped_checks_recorded_in_metrics(self):
+        """
+        Verifies that every check that cannot run records its reason in metrics['checks_skipped'].
+        Never fails open silently.
+        """
+        job = FederationJob(
+            federation_job_id="JOB_SKIPPED_CHECKS",
+            task="malaria",
+            task_type="image_classification",
+            architecture="mobilenet",
+            num_classes=2,
+            class_mapping={},
+            expected_participants=["H1"],
+            minimum_participants=1,
+            deadline="",
+            training_requirements={},
+            aggregation_configuration={},
+        )
+        rnd1 = FederationRound(
+            round_id="R1",
+            federation_job_id="JOB_SKIPPED_CHECKS",
+            round_number=1,
+            expected_participants=["H1"],
+            minimum_participants=1,
+            deadline="",
+            base_model_id="NON_EXISTENT_BASE",
+            base_model_version=1,
+            base_model_checksum="abc",
+        )
+        u = make_update(update_id="u_sk", federation_job_id="JOB_SKIPPED_CHECKS", round_id="R1", participant_id="H1")
+        h = make_handoff([np.ones((5, 5), dtype=np.float32)])
+
+        dec = self.hook.evaluate_update(u, h, job, rnd1)
+        # Base model does not exist: l2 must be recorded in checks_skipped
+        self.assertIn("checks_skipped", dec.metrics)
+        self.assertIn("l2", dec.metrics["checks_skipped"])
+        self.assertIn("not found", dec.metrics["checks_skipped"]["l2"].lower())
+
+        # Round 1 has round_number < 3: cosine check must be skipped with reason
+        self.assertIn("cosine", dec.metrics["checks_skipped"])
+        self.assertIn("round 1 < 3", dec.metrics["checks_skipped"]["cosine"].lower())
+
+        # When shapes mismatch with base model:
+        base_dir = self.storage.get_global_model_dir(job.task, job.architecture, 1)
+        make_handoff([np.ones((10, 10), dtype=np.float32)]).save(base_dir)
+        rnd_with_base = FederationRound(
+            round_id="R1_B",
+            federation_job_id="JOB_SKIPPED_CHECKS",
+            round_number=1,
+            expected_participants=["H1"],
+            minimum_participants=1,
+            deadline="",
+            base_model_id="GM1",
+            base_model_version=1,
+            base_model_checksum="abc",
+        )
+        # Handoff has shape (5, 5) while base has (10, 10)
+        dec_mismatch = self.hook.evaluate_update(u, h, job, rnd_with_base)
+        self.assertEqual(dec_mismatch.verdict, "REJECT")
+        self.assertIn("l2", dec_mismatch.metrics["checks_skipped"])
+        self.assertIn("shape mismatch", dec_mismatch.metrics["checks_skipped"]["l2"].lower())
 
 
 if __name__ == "__main__":

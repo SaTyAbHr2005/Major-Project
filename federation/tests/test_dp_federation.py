@@ -14,6 +14,7 @@ from federation.flower_app.server import serve
 from federation.intake import IntakeManager
 from federation.jobs import JobManager
 from federation.models import UpdateStatus
+from federation.security_hooks import SecurityDecision
 from federation.storage import FederationStorage
 from federation.validation import UpdateValidator
 from hospital_client.model_management.config import ModelConfig
@@ -39,8 +40,8 @@ def _sample_parameters():
 
 
 class DummySecurityHook:
-    def evaluate_update(self, update, handoff):
-        return "ACCEPT"
+    def evaluate_update(self, update, handoff, job=None, rnd=None):
+        return SecurityDecision(verdict="ACCEPT")
 
 
 def test_dp_multi_round_accounting_equals_combined_history(tmp_path):

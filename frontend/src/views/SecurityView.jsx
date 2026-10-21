@@ -78,7 +78,14 @@ export const SecurityView = () => {
                     <td className="font-mono">{u.architecture}</td>
                     <td className="font-mono">{u.num_train_samples}</td>
                     <td className="font-mono" title={u.artifact_checksum}>{u.artifact_checksum ? `${u.artifact_checksum.slice(0, 10)}...` : '-'}</td>
-                    <td><span className={statusBadge(u.status)}>{u.status}{u.security_status && u.security_status !== 'OK' ? ` (${u.security_status})` : ''}</span></td>
+                    <td>
+                      <span className={statusBadge(u.status)}>{u.status}{u.security_status && u.security_status !== 'OK' ? ` (${u.security_status})` : ''}</span>
+                      {u.security_metrics?.checks_skipped && Object.keys(u.security_metrics.checks_skipped).length > 0 && (
+                        <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '2px' }} title={Object.entries(u.security_metrics.checks_skipped).map(([k, v]) => `${k}: ${v}`).join('; ')}>
+                          Skipped: {Object.keys(u.security_metrics.checks_skipped).join(', ')}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ fontSize: '11px', color: 'var(--text-secondary)', maxWidth: '320px' }}>{u.security_reason || u.rejection_reason || ''}</td>
                   </tr>
                 ))}

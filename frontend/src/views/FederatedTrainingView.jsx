@@ -511,6 +511,11 @@ export const FederatedTrainingView = () => {
                                       <span style={{ color: 'var(--text-muted)' }}>WAITING</span>
                                     )}
                                   </div>
+                                  {update?.security_metrics?.checks_skipped && Object.keys(update.security_metrics.checks_skipped).length > 0 && (
+                                    <div style={{ fontSize: '10px', color: '#94a3b8', marginTop: '1px' }} title={Object.entries(update.security_metrics.checks_skipped).map(([k, v]) => `${k}: ${v}`).join('; ')}>
+                                      Skipped: {Object.keys(update.security_metrics.checks_skipped).join(', ')}
+                                    </div>
+                                  )}
                                   {reason && (
                                     <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px', wordBreak: 'break-word' }}>
                                       {reason}

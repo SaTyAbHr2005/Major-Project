@@ -279,6 +279,8 @@ Local ML service environment variables (all optional):
 |---|---|
 | **`docs/README.md`** | **start here**: module status, how each module works (methods used), how Module 8 adapts to the machine, how one trainer trains every model, run commands |
 | `docs/module9_readme.md` | Module 9 federated learning (jobs, rounds, base models, validation, FedAvg, notifications) |
+| `docs/module10_readme.md` | Module 10 differential privacy (DP-SGD, Opacus, RDP accounting, privacy budget) |
+| `docs/module12_readme.md` | Module 12 Byzantine/malicious update detection (L2, cosine, sample-count checks, auditable skipped checks, UI) |
 | `architecture.md` | overall platform architecture and team structure |
 | `ml_pipeline_architecture.md` | ML pipeline architecture and the Hospital Desktop integration |
 | `docs/module1_readme.md` - `docs/module3_readme.md` | authentication, researcher desktop, hospital desktop |
@@ -288,9 +290,10 @@ Local ML service environment variables (all optional):
 
 | Implemented and tested | Partial | Not implemented yet |
 |---|---|---|
-| Modules 1-3 (auth, researcher desktop, hospital desktop; a few screens are marked mock) | 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests | 11 secure communication (TLS), 12 malicious-update detection |
+| Modules 1-3 (auth, researcher desktop, hospital desktop; a few screens are marked mock) | 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests | 11 secure communication (TLS) |
 | Modules 4-8, 16 (hospital-side ML pipeline) | | 17 mobile app, 20 experiments, 21 packaging |
 | 10 differential privacy (DP-SGD, privacy accounting and budget, see [docs/module10_readme.md](docs/module10_readme.md)) | | |
+| 12 Byzantine/malicious update detection (L2 norm, L2 ratio, cosine checks, sample-count consistency; auditable skipped checks; see [docs/module12_readme.md](docs/module12_readme.md)) | | |
 | Module 9 federated learning (custom central protocol, not Flower) | | |
 
 Full per-module status: `docs/README.md` section 2.

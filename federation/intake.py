@@ -98,13 +98,10 @@ class IntakeManager:
             return update
             
         # 2. Security validation (M12 hook)
-        try:
-            security_decision = self.security_hook.evaluate_update(update, handoff, job=job, rnd=rnd)
-        except TypeError:
-            security_decision = self.security_hook.evaluate_update(update, handoff)
-        verdict = security_decision.verdict if hasattr(security_decision, "verdict") else str(security_decision)
-        reasons_str = "; ".join(security_decision.reasons) if hasattr(security_decision, "reasons") and security_decision.reasons else ""
-        metrics_dict = getattr(security_decision, "metrics", {}) or {}
+        decision = self.security_hook.evaluate_update(update, handoff, job=job, rnd=rnd)
+        verdict = decision.verdict
+        reasons_str = "; ".join(decision.reasons) if decision.reasons else ""
+        metrics_dict = decision.metrics or {}
 
         update.security_status = verdict
         update.security_reason = reasons_str
