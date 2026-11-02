@@ -68,9 +68,11 @@ const start = async (job) => {
   const flowerArgs = ['-m', 'federation.flower_app', '--job-id', jobId, '--port', String(port),
     '--backend-url', backendUrl, '--status-file', statusPath(jobId)];
 
-  const caCert = process.env.FLOWER_CA;
-  const srvCert = process.env.TLS_CERT_PATH;
-  const srvKey = process.env.TLS_KEY_PATH;
+  // Absolute paths: the Flower process runs from the repo root, not from the backend's working directory.
+  const abs = (p) => (p ? path.resolve(p) : p);
+  const caCert = abs(process.env.FLOWER_CA);
+  const srvCert = abs(process.env.TLS_CERT_PATH);
+  const srvKey = abs(process.env.TLS_KEY_PATH);
 
   if (isTls) {
     if (!caCert || !srvCert || !srvKey) {
@@ -92,7 +94,7 @@ const start = async (job) => {
                     '--server-cert', srvCert,
                     '--server-key', srvKey);
 
-    const backendCa = process.env.ML_BACKEND_CA || caCert;
+    const backendCa = abs(process.env.ML_BACKEND_CA) || caCert;
     if (backendCa && fs.existsSync(backendCa)) {
       flowerArgs.push('--backend-ca', backendCa);
     }
