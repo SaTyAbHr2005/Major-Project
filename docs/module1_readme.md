@@ -99,7 +99,7 @@ Defined in: `src/authentication/permissions/roles.js`
 | `manage_local_client` | ❌ | ❌ | ✅ |
 | `view_hospital_status` | ❌ | ❌ | ✅ |
 
-> **Important:** Researcher access to specific hospitals, models, and training sessions is NOT automatically granted. Those resource-specific controls will be implemented in the relevant future modules (Module 9, 6, etc.).
+> **Important:** Researchers can use their own training requests and see which hospitals participate in them. Federation jobs, global models and audit logs are admin-only, and researchers cannot access hospital resources.
 
 ### Account Status and Transitions
 
@@ -114,7 +114,8 @@ Defined in: `src/authentication/permissions/roles.js`
 **Transition rules:**
 
 ```
-Registration → pending
+Researcher registration → pending
+Hospital operator registration (existing active hospital) → active
 Admin approve → active
 Admin reject  → rejected
 Admin suspend → suspended
@@ -612,7 +613,7 @@ router.get('/hospitals/:hospital_id/clients', requireAuth, requireHospitalAccess
 4. If `req.user.role === 'hospital_operator'` → **compares** `req.user.hospital_id` against the requested `hospital_id`:
    - Match → passes through.
    - No match → returns `403 HOSPITAL_ACCESS_DENIED`.
-5. If `req.user.role === 'researcher'` → **blocked** at Module 1 level. Resource-specific researcher participation rules are implemented in future modules (Module 9, etc.).
+5. If `req.user.role === 'researcher'` → **blocked**. Researchers reach hospital information only through their own training requests.
 
 ### Preferred URL Pattern for Hospital Resources
 
@@ -806,8 +807,7 @@ Time:        7.959 s
 
 The combined Modules 1-3 API suite `tests/api/module_1_2_3_full.test.js` (52 tests, including the
 `/admin/users`, `/admin/audit-logs` and `hospital_name` checks) also passes. Last full backend run
-(`npx jest`, 2026-10-09): 159 passed, 2 failed. The 2 failures are stale expectations in
-`federation.test.js`: they expect hospitals to be refused `GET /federation/jobs`, which hospitals are now allowed to call.
+(`npm test`, 2026-10-23): 188 passed, 0 failed.
 
 ### Test Coverage
 
@@ -917,7 +917,7 @@ const { requireHospitalAccess } = require('../authentication/middleware/hospital
 - **Behavior:**
   - `admin` → always passes
   - `hospital_operator` → passes only if `req.user.hospital_id === req.params.hospital_id`
-  - `researcher` → blocked (resource-specific rules must be added by the relevant future module)
+  - `researcher` → blocked
 - **Rejects with:** `403 HOSPITAL_ACCESS_DENIED`, `400 VALIDATION_ERROR`
 
 ```js

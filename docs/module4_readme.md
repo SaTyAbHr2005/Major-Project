@@ -221,7 +221,7 @@ flowchart TD
 
 ## 18. Module 4 to Module 5 Boundary
 - **Module 4 (Current):** Discovers, validates, inspects, profiles, reports.
-- **Module 5 (Planned):** Consumes the `DatasetProfile.json` to execute dynamic preprocessing.
+- **Module 5 (Implemented):** Consumes the `DatasetProfile.json` to execute dynamic preprocessing.
 
 Module 4 explicitly does *not* normalize images, generate bounding boxes, execute one-hot encoding, execute Dataset splitting, or train ML models. It establishes the input contract for Module 5.
 

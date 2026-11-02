@@ -2,7 +2,7 @@
 
 This is the starting point for reading the project. It explains, in plain terms, what every
 module does, which methods it actually uses, and where to read more. Everything below describes
-the code as it is in this repository (checked against the source on 2026-10-09). Where something
+the code as it is in this repository (checked against the source on 2026-11-02). Where something
 is a heuristic, a default, mock data or not implemented, it says so.
 
 > Research/engineering project. Model outputs are predictions, not clinical diagnoses. Federated
@@ -44,7 +44,7 @@ Per-module documents (each starts with an "At a glance" summary, then the full d
 | 16 Local inference | [module16_readme.md](module16_readme.md) |
 
 Older design documents at the repository root: `architecture.md` (platform and team),
-`ml_pipeline_architecture.md` (ML pipeline design), `m9_implementation_plan.md` (Module 9 plan).
+`ml_pipeline_architecture.md` (ML pipeline design), `m9_implementation_plan.md` (Module 9 plan, kept as history).
 Where they disagree with the module docs, the module docs and the code are current.
 
 ---
@@ -57,8 +57,8 @@ Where they disagree with the module docs, the module docs and the code are curre
 | # | Module | Status | What exists |
 |---|---|---|---|
 | 1 | Authentication & roles | Implemented | Register, login, JWT, roles (admin / researcher / hospital_operator), admin approval, password change, audit log (Node + MongoDB) |
-| 2 | Researcher/Admin desktop | Implemented (some screens mock) | Real: dashboard, training requests, monitoring, hospitals, federation jobs/rounds, global models, users, audit log, update validation. Mock: Experiments, Notifications, Messages |
-| 3 | Hospital desktop | Implemented | Dataset, preprocessing, training, monitor, results, models, inference, federation status, settings. Operator messages are mock |
+| 2 | Researcher/Admin application | Implemented (some screens mock) | Real: dashboard, training requests, monitoring, hospitals, federation jobs/rounds, global models, users, audit log, update validation. Mock: Experiments, Notifications, Messages, and the Halt, Quarantine and Export dialogs |
+| 3 | Hospital application | Implemented | Dataset, preprocessing, training, monitor, results, models, inference, federation status, settings. Operator messages are mock |
 | 4 | Dataset inspection | Implemented | Image folders, CSV, XLS, XLSX; labels from class folders or a metadata CSV |
 | 5 | Preprocessing | Implemented | Quality checks, quarantine, splits (stratified / grouped / existing), leakage checks, manifests |
 | 6 | Model management | Implemented | 8 architectures, versioned safetensors checkpoints, integrity checks |
@@ -68,14 +68,14 @@ Where they disagree with the module docs, the module docs and the code are curre
 | 10 | Differential privacy | Completed (API and admin form; see module10_readme.md for limitations) | Opacus DP-SGD with Poisson sampling, per-sample gradient clipping, Gaussian noise addition, BatchMemoryManager for physical batching, RDP accountant over full round history stored in database ledger, pre-training privacy budget checks, GroupNorm model conversion, and single-exchange Flower rounds without BatchNorm calibration |
 | 11 | Secure communication (TLS) | In progress (see module11_readme.md) | Node.js HTTPS server (TLSv1.2+); WSS Socket.io; Flower gRPC over TLS with certificate verification and Rule 1 (no silent downgrade); hospital ML service backend verification with ML_BACKEND_CA and SAN error guidance; development CA generator scripts/make_dev_certs.py |
 | 12 | Byzantine/malicious update detection | Completed (see module12_readme.md) | L2 delta-norm check, L2 ratio check, cosine similarity check against recent global models, sample-count consistency check, all skipped checks explicitly recorded in metrics and shown in UI (updates still accepted to prevent deadlocks; not fail-closed); trainable-weights-only norms; configurable per-job thresholds (m12_max_l2_norm, m12_max_l2_ratio, m12_min_cosine_similarity); `federation/security_hooks.py`, `federation/intake.py` |
-| 13 | Monitoring & telemetry | Partial | Training progress, Module 8 hardware measurements, admin hospital telemetry |
-| 14 | Database, audit, model storage | Partial | MongoDB (users, hospitals, requests, audit, notifications), SQLite for Module 9, model files on disk |
-| 15 | Model versioning | Partial | Local versions (Module 6) and global model versions/promotion (Module 9) |
-| 16 | Local inference | Implemented | Prediction on a new local image with a chosen model version |
+| 13 | Monitoring & telemetry | Partial | Training progress, Module 8 hardware measurements on the hospital screen, live Flower panel. Per-hospital hardware telemetry for the admin is not implemented |
+| 14 | Database, audit, model storage | Partial | MongoDB (users, hospitals, requests, audit, notifications), SQLite for Modules 9, 10, 12, model files on disk. Admin federation actions are not audited |
+| 15 | Model versioning | Partial | Local versions (Module 6) and global model versions/promotion (Module 9). No hospital download of the promoted model, rollback or export |
+| 16 | Local inference | Implemented | Prediction on a new local image with a chosen local model version. Promoted global models cannot be used here yet |
 | 17 | Mobile app | Not implemented | |
-| 18 | Communication & notifications | Partial | Real: hospital notifications for round opened/closed (MongoDB + live Socket.io). Mock: messages |
+| 18 | Communication & notifications | Partial | Real: hospital notifications for round opened/closed (MongoDB + live Socket.io). Mock: messages, Admin and Researcher notifications |
 | 19 | Testing & reliability | Partial | Unit/integration tests per module (see section 8) |
-| 20 | Research experiments | Not implemented | Experiments screen is mock |
+| 20 | Research experiments | Partial | Done outside the app: 8-model malaria benchmark, Flower bench run, Module 12 synthetic benchmark, indicative DP comparison. Controlled experiments not run; Experiments screen is mock |
 | 21 | Packaging & deployment | Not implemented | Run from source (section 9) |
 
 ---
@@ -90,7 +90,8 @@ Where they disagree with the module docs, the module docs and the code are curre
    Backend API (Node, :5000) <---- verifies login ---- Local ML service (Python, 127.0.0.1:8765)
      |        |                                             |
      |        +-- spawns python federation/api_adapter.py   +-- runs python -m hospital_client.<module>
-     v                     |                                     (Modules 4, 5, 8->7->6, 16)
+     |        +-- starts one Flower server per job <-- Flower --+ (Modules 4, 5, 8->7->6, 16)
+     v                     |
   MongoDB                  v                                     reads the dataset locally
   (users, hospitals,   Module 9 (Python): SQLite federation_metadata.db
    requests, audit,                       + federation_artifacts/ (updates, base and global models)
@@ -100,8 +101,10 @@ Where they disagree with the module docs, the module docs and the code are curre
 - Raw images and datasets are only read on the hospital machine. The backend never receives them.
 - A hospital sends the backend: aggregate training progress (epoch, loss, accuracy), and for a
   federated round, its model update (parameters + metadata, no images).
-- **Limitation:** a hospital submits its update by sending the server the *folder path* of the
-  update files, so today the hospital and the federation server must be on the same machine.
+- **Flower jobs** send the update over the Flower connection. **Manual-round jobs** send the server
+  the *folder path* of the update files, so the hospital and the server must share a machine.
+- **Roles:** Admin, Researcher and Hospital Operator are separate. Researchers publish training requests;
+  Admins run federation jobs. A training request does not create a federation job.
 
 ---
 
@@ -332,8 +335,9 @@ aggregates each round by hand.
    and promote it. The next round starts from it.
 
 DP jobs train with DP-SGD and the server keeps a privacy ledger (Module 10, see
-[module10_readme.md](module10_readme.md)). Not implemented: TLS (Module 11), malicious-update detection
-(Module 12, hook accepts everything). Details: [module9_readme.md](module9_readme.md).
+[module10_readme.md](module10_readme.md)). Each update goes through Module 12's security checks before
+aggregation ([module12_readme.md](module12_readme.md)). TLS is available with `TLS_ENABLED=true` (Module 11, final
+checks open; [module11_readme.md](module11_readme.md)). Details: [module9_readme.md](module9_readme.md).
 
 ---
 
@@ -343,24 +347,33 @@ DP jobs train with DP-SGD and the server keeps a privacy ledger (Module 10, see
   folder path). Flower jobs send the weights over the Flower connection instead; for hospitals on other
   machines, set `FLOWER_PUBLIC_HOST` to the server's address. So far this has only been run with
   everything on one machine.
-- No TLS, no Byzantine defence.
+- TLS (Module 11) is optional: it needs `TLS_ENABLED=true` and certificates, and its final manual checks are
+  still open. See [module11_readme.md](module11_readme.md).
+- Byzantine detection (Module 12) has documented limits, such as no robust aggregation with 2 hospitals and no
+  sign-flip detection in rounds 1-2. See [module12_readme.md](module12_readme.md).
 - Differential privacy protects individual training images, not whole patients, and assumes hospitals
   apply the configured noise honestly. See [module10_readme.md](module10_readme.md).
 - Module 5's grouped split keeps patients/lesions together but does not stratify by class. Check
   the per-split class counts in the report.
 - Images are not mean/std-normalised, and models train from scratch. Fine for experiments, but
   accuracy on small datasets will be lower than with pretrained weights.
+- Oversampling and undersampling only record ratios, and class weighting is not offered in the app. See
+  [module5_readme.md](module5_readme.md) and [module7_readme.md](module7_readme.md).
+- Hospitals cannot download a promoted global model for local inference yet (Modules 15 and 16).
+- Researchers cannot see federation jobs or global models, and Admin federation actions are not audited.
 - Several admin/researcher screens are mock (marked with a banner).
 
 ---
 
 ## 8. Tests
 
+Last full run: 2026-10-23, on `module-11-tls`.
+
 | Suite | Command | Last result |
 |---|---|---|
-| Hospital ML pipeline (Modules 4-8, 16, local ML service) | `python -m pytest hospital_client -q` | 828 passed, 1 skipped (~16 min) |
-| Module 9 federation | `python -m pytest federation/tests -q` | 31 passed |
-| Backend (Modules 1-3, 9 routes, notifications) | `cd backend; npx jest` | 159 passed, 2 failing (stale: they expect hospitals to be refused the job list) |
+| Hospital ML pipeline (Modules 4-8, 16, local ML service) | `python -m pytest hospital_client -q` | 865 passed, 1 skipped |
+| Federation (Modules 9, 10, 11, 12) | `python -m pytest federation/tests -q` | 142 passed (~8 min) |
+| Backend (Modules 1-3, 9 routes, TLS, notifications) | `cd backend; npm test` | 188 passed |
 | Frontend build | `cd frontend; npx vite build` | builds |
 
 ---
@@ -375,4 +388,4 @@ python -m hospital_client.local_api      # local ML service http://127.0.0.1:876
 cd frontend; npm run dev                 # web app          http://localhost:5173
 ```
 
-Open http://localhost:5173 and sign in.
+Open http://localhost:5173 and sign in. For TLS mode, see [module11_readme.md](module11_readme.md).

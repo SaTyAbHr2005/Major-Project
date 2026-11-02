@@ -116,7 +116,7 @@ When `TLS_ENABLED=true`, `createHttpServer()` starts an HTTPS server using `http
 
 When `TLS_ENABLED=true`:
 - Requires `FLOWER_CA`, `TLS_CERT_PATH`, and `TLS_KEY_PATH`. If any are unset or the files do not exist, `flowerService.start()` immediately rejects with `[TLS ERROR]` (no plaintext Flower server in TLS mode).
-- Passes `--ca-cert`, `--server-cert`, and `--server-key` to `python -m federation.flower_app`.
+- Resolves these paths to absolute paths, because the Flower process runs from the repository root, then passes `--ca-cert`, `--server-cert`, and `--server-key` to `python -m federation.flower_app`.
 - Passes `--backend-ca` (pointing to `ML_BACKEND_CA`) for backend identity verification over HTTPS.
 
 ### 4. Flower Server CLI — `federation/flower_app/__main__.py`
@@ -136,7 +136,7 @@ When `TLS_ENABLED=true`:
 ## Known Limitations
 
 - **Backend CORS and Socket.io accept any origin**: The backend and Socket.io currently accept requests from any origin (`cors()`). Restricting origins to specific frontend origins is left for production deployment.
-- **Real browser verification status: Not verified**: Automated browser verification for CA trust is not verified because `certutil -user -addstore` triggers a Windows GUI security warning dialog that cannot be automated without interactive user intervention.
+- **Real browser verification is partly done**: The CA install needs a Windows security dialog, so this check is manual. Confirmed by hand: the HTTPS API loads without a certificate warning, and Socket.io connects over WSS. Still open: the certificate viewer check, confirming `http://` is refused, the hospital pages on `127.0.0.1:8765`, and a complete federation run over TLS.
 - **No mutual TLS (mTLS)**: The server verifies itself to clients, but clients do not present client certificates to the server (authentication is achieved via bearer JWTs over TLS).
 - **No certificate rotation without restart**: Updating certificates requires restarting the backend and Flower server.
 - **Browser → Local ML Service is HTTP loopback**: Served on `http://127.0.0.1:8765`. Modern browsers permit HTTPS pages to fetch from `127.0.0.1` because loopback is a W3C Trustworthy Origin.

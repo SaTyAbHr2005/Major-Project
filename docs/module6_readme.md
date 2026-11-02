@@ -51,7 +51,7 @@ Module 6 manages:
 - model/preprocessing compatibility
 - CPU/CUDA portability
 - model parameter extraction/loading
-- future integration with Modules 7, 9, and 16
+- integration with Modules 7, 9, and 16
 
 Module 6 does not perform training, resource-aware selection, federated
 aggregation, or inference.
@@ -852,11 +852,11 @@ using deterministic model state-dictionary registration order.
 The parameter round-trip is tested for equivalent parameters and identical
 forward-pass output.
 
-## 23. Future Module 9 Integration
+## 23. Module 9 Integration
 
 Module 6 does not import Flower.
 
-The intended relationship is:
+The relationship is:
 
 ```
 Module 6
@@ -1417,13 +1417,14 @@ Each trained model remains associated with its configured task and dataset.
 - CLI
 - path security
 
-### DESIGNED FOR FUTURE INTEGRATION
+### USED BY OTHER MODULES
 
 - Module 7 local training
 - Module 8 resource-aware selection
 - Module 9 federated learning
-- Module 15 platform-wide governance
 - Module 16 inference
+
+Module 15 platform-wide governance is not connected yet.
 
 ### NOT IMPLEMENTED
 

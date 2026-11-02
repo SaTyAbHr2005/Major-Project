@@ -311,13 +311,9 @@ M9 strictly implements and verified the following:
 - Dynamic historical provenance calculation.
 
 ## 20. Known Scope / Future Modules
-M9 acts as the foundational lifecycle and provenance pipeline. The following capabilities are outside the current M9 implementation and may be addressed by later security/privacy modules:
-- Differential Privacy
-- Enhanced secure communication / transport protections
-- Byzantine / malicious update detection
-- Advanced telemetry and monitoring
+M9 acts as the foundational lifecycle and provenance pipeline. Differential privacy, TLS and Byzantine/malicious-update detection are provided by Module 10, Module 11 (in progress) and Module 12. The following capabilities are outside the current implementation:
+- Advanced telemetry and monitoring (Module 13)
 - Submitting updates between machines in manual-round jobs: the hospital sends the server the folder path of its update, so hospital and server must share a machine (Flower jobs send the update itself over Flower, section 25)
-- Module 12's hook (`federation/security_hooks.py`) currently accepts every update
 - More advanced privacy-preserving aggregation mechanisms such as FHE or SMPC, if adopted by the project
 - Hospitals cannot yet download the promoted `MAIN` model for local inference (Module 15/16 integration)
 
@@ -382,7 +378,7 @@ job on the malaria data in the application (section 25.8). Open inside Module 9:
 manual-round jobs (section 20).
 The FedAvg vs FedProx experiments belong to Module 20.
 
-M9 is the completed federation lifecycle and aggregation foundation for the current project scope. Privacy-enhancing mechanisms, enhanced secure-transport protections, Byzantine/malicious-update detection, and advanced telemetry remain outside the current M9 implementation and are reserved for subsequent modules.
+M9 is the completed federation lifecycle and aggregation foundation for the current project scope. Differential privacy, TLS and Byzantine/malicious-update detection are provided by Modules 10, 11 and 12; advanced telemetry remains for Module 13.
 
 ## 24. Round Plan, FedProx and the Flower Simulation Bench (added 2026-10-14)
 
@@ -559,7 +555,7 @@ last 200 events. A status not updated for 30 s while the run is not finished is 
 
 ### 25.6 Limitations
 - Uses Flower's `start_server`/`start_client` (deprecated since Flower 1.13; no SuperLink/SuperNode).
-- No TLS on the Flower connection (`insecure=True`) until Module 11. The token travels in clear text on that link.
+- TLS on the Flower connection is optional (Module 11). With `TLS_ENABLED=true` it runs over TLS with certificate verification; without it the connection uses `insecure=True` and the token travels in clear text.
 - On one machine with one GPU, hospitals train one after another (the training lock is machine-wide), so a round
   takes as long as all hospitals' training together.
 - **Stop** ends the Flower server but leaves the current Module 9 round open; **Start federation** continues it.

@@ -310,7 +310,7 @@ Resource-aware model selection belongs to Module 8, local training belongs to Mo
 Module 7 is the implemented hospital/local-side PyTorch training engine. It consumes
 Module 5's prepared image-classification manifests, obtains a model from Module 6,
 trains it locally, evaluates it, tracks metrics, checkpoints the best result, and
-prepares a validated `FederationHandoff` for the future Module 9 federated-learning
+prepares a validated `FederationHandoff` for the Module 9 federated-learning
 engine. Module 7 does not transmit or aggregate model updates.
 
 Conceptually:
@@ -420,9 +420,8 @@ synthetic datasets for functional verification and therefore do not establish
 medical-imaging accuracy or clinical validity. Formal research experiments belong to
 Module 20.
 
-Module 7 does not yet receive a federated global model through a Module 9 round-trip
-protocol, and it does not send completion/failure notifications. Those are future
-integrations.
+In a federated run, Module 7 trains from the round's checksum-verified base model. It
+does not send completion/failure notifications, which remain future integration.
 
 ## 9. Module 8: Resource-Aware Training
 **Status: [x] COMPLETED**
@@ -908,18 +907,14 @@ if real-world measurements diverge meaningfully from the current estimates.
 
 #### 9. Module 9 Consumption of Module 8's Resource Statistics and Handoff
 
-- [ ] **Validate that a future Module 9 can consume Module 8's
-  `ResourceStatistics` and the `FederationHandoff` Module 8 obtains from
-  Module 7.**
+- [x] **Module 9 consumes the `FederationHandoff` Module 8 obtains from Module 7.**
 
 Module 8 already calls Module 7's own `build_federation_handoff()` after a
 training run reaches a federation-ready status, and already produces a
-structured, PHI-free `ResourceStatistics` record for every run. Module 9
-does not exist yet in this repository, so this consumption has not been
-verified end-to-end. The remaining integration work is to confirm that a
-future Module 9 can use these outputs (parameter arrays, metadata, protocol
-version, and resource/timing statistics) without requiring any change to
-Module 8's or Module 7's existing contracts.
+structured, PHI-free `ResourceStatistics` record for every run. Module 9 uses
+the handoff's parameter arrays and metadata, verified by its tests and by real
+malaria runs. It does not use `ResourceStatistics`; that remains future
+telemetry work (Module 13).
 
 #### 10. Module 16 — Preprocessing Metadata for Older Models and Module 5 Resize Consistency
 

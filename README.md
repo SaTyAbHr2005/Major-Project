@@ -1,8 +1,8 @@
 # Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging
 
 A platform for training and using deep learning models on medical images while keeping raw hospital
-data on the hospital's own machine. It has a researcher/admin desktop, a hospital desktop, a backend
-API, and a hospital-side ML pipeline.
+data on the hospital's own machine. It has one web app with separate Admin, Researcher and Hospital
+Operator screens, a backend API, a federated learning server and a hospital-side ML pipeline.
 
 > Research/engineering project. Model outputs are predictions, not clinical diagnoses.
 
@@ -15,7 +15,7 @@ Major Project/
 ├── frontend/          React + Vite app: researcher/admin screens and hospital screens (one app)
 ├── backend/           Node.js + Express API: login, roles, users, hospitals, training requests,
 │                      federation routes, notifications (MongoDB)
-├── federation/        Module 9 - central federated learning server (jobs, rounds, validation, FedAvg)
+├── federation/        Modules 9, 10, 12 - central federated learning server (jobs, rounds, Flower, validation, aggregation)
 ├── hospital_client/   Python ML pipeline that runs on the hospital machine
 │   ├── dataset/            Module 4  - dataset inspection
 │   ├── preprocessing/      Module 5  - preprocessing and train/validation/test splits
@@ -290,11 +290,11 @@ Local ML service environment variables (all optional):
 
 | Implemented and tested | Partial | Not implemented yet |
 |---|---|---|
-| Modules 1-3 (auth, researcher desktop, hospital desktop; a few screens are marked mock) | 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests | 11 secure communication (TLS) |
-| Modules 4-8, 16 (hospital-side ML pipeline) | | 17 mobile app, 20 experiments, 21 packaging |
+| Modules 1-3 (auth, researcher/admin screens, hospital screens; a few screens are marked mock) | 11 secure communication (TLS implemented and tested; final manual checks open), 13 monitoring, 14 storage/audit, 15 versioning, 18 notifications (messages are mock), 19 tests, 20 experiments (benchmarks only) | 17 mobile app, 21 packaging |
+| Modules 4-8, 16 (hospital-side ML pipeline) | | |
 | 10 differential privacy (DP-SGD, privacy accounting and budget, see [docs/module10_readme.md](docs/module10_readme.md)) | | |
 | 12 Byzantine/malicious update detection (L2 norm, L2 ratio, cosine checks, sample-count consistency; auditable skipped checks; see [docs/module12_readme.md](docs/module12_readme.md)) | | |
-| Module 9 federated learning (custom central protocol, not Flower) | | |
+| Module 9 federated learning (central server; jobs run through Flower in the app, manual rounds also available) | | |
 
 Full per-module status: `docs/README.md` section 2.
 

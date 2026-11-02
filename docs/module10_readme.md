@@ -137,7 +137,7 @@ Naive per-round addition (not used) would give 5.4432 and 5.2142 respectively.
 
 ## What DP Does Not Protect Against
 
-1. **Model inversion / gradient inversion on the update itself.** Opacus adds noise to gradients before the update leaves the hospital. A sufficiently powerful server may still attempt to reconstruct training images from the noised gradient update. Module 11 (encryption in transit, planned, not implemented yet) would prevent the update being read in transit; Module 12 (Byzantine / malicious-update detection) addresses adversarial updates from participants, but neither provides reconstruction resistance. There is no planned secure aggregation module.
+1. **Model inversion / gradient inversion on the update itself.** Opacus adds noise to gradients before the update leaves the hospital. A sufficiently powerful server may still attempt to reconstruct training images from the noised gradient update. Module 11 (TLS, enabled with `TLS_ENABLED=true`) prevents the update being read in transit; Module 12 (Byzantine / malicious-update detection) addresses adversarial updates from participants, but neither provides reconstruction resistance. There is no planned secure aggregation module.
 
 2. **Membership inference from the model by an observer who sees per-round model snapshots.** The (ε, δ) guarantee is over the entire published sequence; a model published after each round is covered. However, an observer who can query the model and accumulate signal across many rounds can mount practical membership inference attacks even within the DP guarantee — ε=3 does not mean an attack is infeasible.
 
@@ -235,7 +235,7 @@ python -m hospital_client.resource_training \
 
 ## Known Limitations
 
-1. **No secure aggregation is planned.** Noised updates are sent in plaintext to the server. Module 11 (planned, not implemented yet) would encrypt the transport layer, so updates currently travel unencrypted. Module 12 (planned) would detect adversarial updates. Neither provides cryptographic aggregation hiding individual updates from the server.
+1. **No secure aggregation is planned.** The server receives each noised update in readable form. Module 11 (TLS, enabled with `TLS_ENABLED=true`) encrypts updates in transit; without it they travel unencrypted. Module 12 detects some adversarial updates. Neither provides cryptographic aggregation hiding individual updates from the server.
 
 2. **Single-machine DP only.** Opacus `DistributedDPOptimizer` (multi-GPU / multi-process) is not supported. Each hospital must train on a single process.
 
@@ -342,5 +342,5 @@ a non-DP MobileNetV3-Small job with the same settings (see Future Work).
 4. **Verifying that noise was added.** Trusted hardware with remote attestation (for example Intel
    TDX, AMD SEV, or GPU confidential computing) or cryptographic proofs of training would let the
    server verify the hospital ran the unmodified DP code. Neither is practical on the current hardware.
-5. **Encryption in transit.** Module 11 (TLS) is required so that noised updates are not readable on
-   the network.
+5. **Encryption in transit by default.** Module 11 (TLS) is implemented but optional, so noised updates
+   are readable on the network unless `TLS_ENABLED=true`. Its final manual checks are still open.

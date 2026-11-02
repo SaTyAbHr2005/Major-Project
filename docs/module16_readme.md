@@ -319,8 +319,10 @@ skip cleanly on machines without CUDA.
    kernel warns rather than fails. Peak memory is reported for CUDA only; inference is fp32 only. The `auto`
    device's VRAM check is a heuristic (3x the weight file vs free VRAM at load time), so a prediction can still
    hit CUDA OOM later (reported as a `FAILED` result).
-8. **Dependent modules do not exist yet.** Modules 9-15 are not implemented, so there is no federated-model
-   provisioning, DP metadata, secure delivery, approval workflow, version governance, persistence, audit, or
-   telemetry (Module 16 stores nothing and only exposes the interfaces in §13). Desktop integration
+8. **Dependent integrations do not exist yet.** Modules 9-12 now exist and Modules 13-15 are partial, but none
+   is connected to hospital-side inference, so there is no federated-model provisioning, DP metadata, secure
+   delivery, approval workflow, version governance, persistence, audit, or telemetry here (Module 16 stores
+   nothing and only exposes the interfaces in §13). Module 9's admin evaluation reuses the inference engine on
+   the server. Desktop integration
    (Module 3) is implemented through the local ML service and was tested end to end on 2026-09-27 with
    synthetic images only (§12).

@@ -46,11 +46,10 @@ generation (Module 5); model architecture definitions, artifact storage,
 versioning (Module 6 - reused, not duplicated); hardware detection or
 resource-aware model/batch-size/device selection (Module 8); Flower,
 FedAvg/FedProx strategies, federated aggregation, or any network transmission (Module
-9; Module 7 only provides FedProx's local proximal term, `proximal_mu`, see section 7); differential privacy (Module 10); TLS/secure communication (Module 11);
+9; Module 7 only provides FedProx's local proximal term, `proximal_mu`, see section 7); differential privacy rules and accounting (Module 10; its DP-SGD code runs inside the trainer when a job enables it); TLS/secure communication (Module 11);
 Byzantine/malicious-update detection (Module 12); platform-wide model
 governance (Module 15); inference/prediction execution (Module 16);
-desktop/mobile UI, notifications (Modules 2/3/17/18). Verified by `grep` -
-**NOT FOUND** anywhere in this package.
+desktop/mobile UI, notifications (Modules 2/3/17/18).
 
 ## 4. Architecture
 
@@ -139,9 +138,8 @@ plain classification loss; `0` = unchanged training; tests in `tests/test_fedpro
 
 **Module 8 boundary**: `device`/`batch_size`/`epochs`/`learning_rate` are
 plain fields Module 7 *executes*; nothing in this module inspects hardware
-to choose them. A future Module 8 is expected to populate the same
-`TrainingConfig` fields (or an equivalent `ResolvedTrainingConfig`) before
-handing it to `Trainer`.
+to choose them. Module 8 populates the same `TrainingConfig` fields
+before handing it to `Trainer`.
 
 ## 8. Loss and Class Imbalance
 
@@ -269,8 +267,8 @@ when present. Module 16 (Local Inference) uses it to reproduce and verify the tr
 All dataset loading and training happen entirely on the local filesystem
 path Module 5 already prepared. Module 7 performs no network I/O of any
 kind and uploads nothing. The `FederationHandoff` it prepares is an
-in-memory object only - actual transmission is Module 9's future
-responsibility, which does not exist in this repository. Module 7 alone
+object only - the hospital's local ML service and Flower client send it
+to Module 9. Module 7 alone
 does not constitute complete privacy protection for the platform.
 
 ## 14. CLI
@@ -395,11 +393,9 @@ than fail or fabricate a result.
   metrics, checkpoint/resume mechanics) on tiny synthetic data - they do
   not and cannot establish real medical-imaging accuracy; that is Module
   20's (Research Experiments and Evaluation) responsibility - see §21.
-- No mechanism yet exists to actually receive a Module 6 "global federated
-  model" for continued local training - `Trainer`/`get_model` can already
-  load any valid Module 6 checkpoint by `(model_id, version)`, but a
-  round-trip convention (global model in → local fine-tuning) is Module 9's
-  future design, not Module 7's.
+- Federated runs start from the round's base model, downloaded and
+  checksum-verified by the local ML service. A hospital cannot yet download
+  a promoted global model for later local use (Modules 15 and 16).
 - Notification of training completion/failure to a user interface is not
   implemented here - see §21.
 - Class weighting (§8) is available only through the training CLI
@@ -511,7 +507,7 @@ seeding.
 
 `hospital_client/training/federation.py` defines a versioned,
 explicitly-serializable contract for handing a completed local training
-result to a future Module 9 (Federated Learning Engine). **This module
+result to Module 9 (Federated Learning Engine). **This module
 implements only the contract/data structure - no Flower integration, no
 FedAvg/FedProx, no federated rounds, no network transport, no aggregation,
 and no security/privacy layer.** Those remain Module 9/10/11/12's
@@ -560,9 +556,8 @@ negative sample count (`tests/test_federation.py`).
 
 **No coupling to a transport**: nothing in `federation.py` imports HTTP
 clients, Socket.IO, Flower, or MongoDB drivers. It is a plain, versioned,
-serializable Python object - how a future Module 9 actually receives one
-(HTTP call, message queue, shared filesystem, etc.) is entirely Module 9's
-design decision.
+serializable Python object. Module 9 receives it over the Flower connection
+(Flower jobs) or as a folder path on a shared machine (manual-round jobs).
 
 ## 21. Remaining / Future Integration (NOT part of Module 7 - not completed here)
 

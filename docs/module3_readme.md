@@ -3,16 +3,16 @@
 **Project:** Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging  
 **Owner:** Member 4 (Frontend + Desktop + Mobile + Communication)  
 **Location:** `frontend/` (consolidated researcher + hospital app; hospital screens are `frontend/src/views/Hospital*View.jsx`)  
-**Status:** Functionally Complete; ML screens integrated with the real Member 1 pipeline  
-**Last Updated:** 2026-09-27
+**Status:** Implemented; ML screens use the real pipeline, operator messages are mock  
+**Last Updated:** 2026-11-02
 
 > **Integration update (2026-09-27).** The separate `frontend/hospital-desktop/` and
 > `frontend/researcher-desktop/` apps were removed; `frontend/` is the single app. The hospital
 > ML screens (Modules 4, 5, 6, 7, 8, 16) no longer use mock services: they call the hospital-local
 > ML service (`python -m hospital_client.local_api`, 127.0.0.1:8765), which runs the real module
 > CLIs on this machine. All numbers shown on those screens come from real pipeline output. See
-> `ml_pipeline_architecture.md` → *Hospital Desktop Integration*. Module 9/10/15 cards remain as
-> placeholders for future modules and are labelled as pending.
+> `ml_pipeline_architecture.md` → *Hospital Desktop Integration*. Federation (Module 9), including DP jobs
+> (Module 10) and TLS (Module 11), now runs through the Federation Status screen. Module 15 approval is still pending.
 
 ---
 
@@ -24,11 +24,11 @@
 - [x] Module 8: up to 3 hardware- and data-aware recommendations, a same-tier alternative for each, a manual configuration with a load meter, and all 8 model assessments; the operator must choose one explicitly
 - [x] Module 7: launch training, live per-epoch loss/accuracy curves, log stream, terminate
 - [x] Module 7: results with test metrics, per-class table, confusion matrix, ROC/PR plot images, resource statistics
-- [x] Module 9 placeholder: FederationHandoff prepared locally by Module 7 (transmission/aggregation pending in Module 9)
+- [x] Module 9: join requests, automatic training during Flower rounds, step reports, update submission and retry
 - [x] Module 6: local model registry (versions, class mapping, SHA-256); Module 15 approval pending
 - [x] Module 16: local inference on an uploaded image (temporary copy deleted after prediction)
 - [x] Optional link of a local run to a backend training request (aggregate progress only)
-- [x] Module 18: Consortium Communication, Dispatch Chat & Notification Inbox (UI)
+- [x] Module 18: real round notifications (operator messages are still mock)
 - [x] Module 1: Authentication & Strict Hospital Isolation Adapter (`authService.js`)
 - [x] Workstation Settings (UI)
 
@@ -36,11 +36,11 @@
 
 ## 1. Module Purpose & Core Architecture
 
-Module 3 is the hospital-side desktop application for clinical nodes. It provides the workstation interface for clinical data managers, radiomics operators, and medical imaging technologists participating in privacy-preserving federated deep learning.
+Module 3 is the hospital-side part of the web app, run in a browser on the hospital machine; desktop packaging is Module 21. It is the workstation interface for hospital operators taking part in federated deep learning.
 
 ### Cardinal Privacy Invariant
 > **RAW MEDICAL DATA NEVER LEAVES THE HOSPITAL.**  
-> Medical images (DICOM series, NIfTI volumes, high-resolution radiographs), patient cohorts, and Protected Health Information (PHI) remain strictly local. Only model weight updates (delta parameters for Module 9) and authorized telemetry are ever transmitted to the central consortium server.
+> Medical images and patient data remain local. Only model updates, required metadata and authorized telemetry are transmitted to the central server.
 
 ```text
                                +------------------------------------------+
@@ -69,7 +69,7 @@ Module 3 is the hospital-side desktop application for clinical nodes. It provide
                                |   Backend & Consortium Infrastructure    |
                                |  • Module 1: Auth & Hospital Isolation   |
                                |    (HOSP_000001, ROLES.HOSPITAL_OPERATOR)|
-                               |  • Module 9: Central Aggregator (future) |
+                               |  • Module 9: Central Aggregator          |
                                +------------------------------------------+
 ```
 
@@ -91,10 +91,10 @@ in or out, and the running training job is resumed after a page reload.
 | Preprocessing results, split accounting & leakage checks | ✅ | Module 5 (Preprocessing) |
 | Hardware inspection & 3-option training recommendation | ✅ | Module 8 (Resource-Aware Engine) |
 | Local deep learning training monitor & loss/accuracy curves | ✅ | Module 7 (Local Training) |
-| Display of the locally prepared `FederationHandoff` (built by Module 7) | ✅ | Module 9 (FL Engine, pending) |
+| Federation participation and update submission (`FederationHandoff` built by Module 7) | ✅ | Module 9 (FL Engine) |
 | Local model registry view | ✅ | Module 6 (Model Management) |
 | Local inference entry point | ✅ | Module 16 (Local Inference) |
-| Secure consortium messaging & alert center | ✅ | Module 18 (Communication) |
+| Round notifications (operator messaging is mock) | ✅ | Module 18 (Communication) |
 | Raw image transmission outside hospital network | ❌ *(Permanently blocked)* | Core Architectural Invariant |
 | Central model aggregation across multiple hospitals | ❌ | Handled centrally in Module 9 |
 
@@ -104,9 +104,9 @@ in or out, and the running training job is resumed after a page reload.
 
 Module 3 enforces the strict security rules of Module 1:
 
-1. **Role Enforcement:** Only accounts with `role === 'hospital_operator'` may access the application. Attempts to authenticate with `researcher` credentials are automatically rejected with `HOSPITAL_ACCESS_DENIED`.
+1. **Role Enforcement:** Only `hospital_operator` accounts see these screens, and the local ML service accepts only those accounts. Admin and Researcher are separate roles with their own screens (Module 2).
 2. **Hospital Isolation:** Every action is scoped to the operator's assigned `hospital_id` (e.g. `HOSP_000001` - *St. Jude Clinical AI Node*). Operators cannot view or query data from any other hospital node.
-3. **Zero-Raw-Data Lock:** The application UI displays a permanent, non-dismissible Zero-Raw-Data compliance seal. Network payloads are restricted to gradient deltas, sample counts, and sanitized execution telemetry.
+3. **Raw data stays local:** Network payloads are limited to model updates, sample counts, the local eligibility summary and aggregate training progress.
 
 ---
 
@@ -143,7 +143,7 @@ Module 3 enforces the strict security rules of Module 1:
 - Validation and held-out test accuracy/loss/F1, macro ROC-AUC and average precision, per-class metrics and the confusion matrix from `<model_id>_training_result.json`.
 - The evaluation plots generated by Module 7 (confusion matrix, ROC and precision-recall curves).
 - Module 8 resource statistics (peak VRAM/RAM, CPU, GPU utilization when available, throughput, estimated vs actual time, OOM events, batch adaptations).
-- Module 9 card: the FederationHandoff prepared locally by Module 7 (no images); transmission/aggregation is pending in Module 9.
+- Module 9 card: the FederationHandoff prepared locally by Module 7 (no images), which federated runs submit to the round.
 - Run history table and a raw-JSON audit inspector.
 
 ### 7. Module 6: Local Model Registry (`HospitalModelsView.jsx`)
@@ -153,7 +153,9 @@ Module 3 enforces the strict security rules of Module 1:
 - Select a model and an explicit version, a device (auto/CUDA/CPU) and a local image; the image is sent only to 127.0.0.1, processed with the model's own preprocessing spec, and its temporary copy is deleted after the prediction.
 - Predicted class, uncalibrated softmax confidence, full class probability distribution, timing, warnings, and the "model prediction, not a clinical diagnosis" notice.
 ### 9. Module 9: Federation Status (`HospitalFederationView.jsx`)
-- Eligibility of the selected dataset for each federation job, the participate flow (themed confirm modal, then the Training Monitor), and this hospital's submitted updates with their validation status.
+- Eligibility of the selected dataset for each federation job, the join request sent to the Admin (local eligibility summary only), the participate flow (themed confirm modal, then the Training Monitor), and this hospital's submitted updates with their validation status.
+- In Flower jobs, approved hospitals train automatically while the app is open and signed in, and the screen shows the current step. DP jobs apply the job's noise settings automatically.
+- A promoted global model cannot be downloaded here yet (Modules 15 and 16).
 - Before a federated run starts, the local ML API downloads the round's base model from the backend into `trained/<architecture>/models/<base_model_id>/v<version>` (once per base model); Module 7 then refuses to train if its parameter checksum differs from the round's.
 - **Retry Submission** for a finished federated run whose update never reached Module 9: the local ML API (`POST /api/ml/federation/submit/<model_id>`) resubmits the run's handoff folder to the job and round saved in its `<model_id>_run.json`. Runs started before the round id was saved cannot be resubmitted (409).
 
@@ -175,8 +177,8 @@ together with that app and its mock services. The integrated behaviour is covere
 python -m pytest hospital_client/local_api -q                 # local ML service: auth, origin checks,
                                                               # input validation, real M4->M5 run,
                                                               # job cancel, temp-file cleanup
-python -m pytest hospital_client -q                           # full Member 1 suite (771 passed, 1 skipped)
-cd backend && npm test                                        # includes tests/api/training_progress.test.js (81 passed)
+python -m pytest hospital_client -q                           # full hospital suite (865 passed, 1 skipped, 2026-10-23)
+cd backend && npm test                                        # includes tests/api/training_progress.test.js (188 passed, 2026-10-23)
 cd frontend && npx vite build                                 # frontend compiles
 ```
 

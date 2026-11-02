@@ -117,7 +117,7 @@ Module 8 never redefines an architecture or a model config schema.
   CUDA compute capability
 - **Storage**: total/free space at the configured output path (`psutil.disk_usage()`)
 - **Network**: a short-timeout (default 0.5s), non-blocking TCP connect probe recording
-  availability and latency - recorded for future Module 9 telemetry only, **never** required for
+  availability and latency - recorded for telemetry only, **never** required for
   or blocking local training
 
 Every detector is isolated: a failure on one axis (e.g. an unreadable storage path) is recorded
@@ -497,9 +497,9 @@ or any network transmission. It only prepares a resource-aware `TrainingConfig`,
 a `ResourceStatistics` record and (when applicable) a `FederationHandoff` obtained by calling
 Module 7's own existing `build_federation_handoff()` unchanged (§13, step 5). Module 8 does not
 transmit the handoff anywhere, does not implement rounds/aggregation/strategy, and does not know
-about Flower - producing the handoff object is as far as this pipeline goes. What a future
-Module 9 does with the `TrainingConfig`/`ResourceStatistics`/`FederationHandoff` is entirely
-Module 9's design decision.
+about Flower - producing the handoff object is as far as this pipeline goes. The hospital's local
+ML service and Flower client send the `FederationHandoff` to Module 9. Module 9 does not use
+`ResourceStatistics`.
 
 ## 17. Module 20 Boundary
 

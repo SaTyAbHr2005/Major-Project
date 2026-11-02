@@ -1,75 +1,64 @@
-# Module 2: Researcher & Consortium Admin Desktop Application
+# Module 2: Researcher & Admin Application
 
-**Project:** Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging  
-**Owner:** Member 4 (Frontend + Desktop + Mobile + Communication)  
-**Location:** `frontend/` (consolidated app; researcher views in `frontend/src/views/`)  
-**Status:** Functionally Complete & Verified (`[x] Completed`)  
-**Last Updated:** 2026-09-23
+**Project:** Secure and Privacy-Preserving Federated Deep Learning Training Platform for Medical Imaging
+**Owner:** Member 4 (Frontend + Desktop + Mobile + Communication)
+**Location:** `frontend/` (one web app; views in `frontend/src/views/`). Desktop packaging is Module 21 and not done yet.
+**Status:** Implemented, with some screens still mock (marked with a banner)
+**Last Updated:** 2026-11-02
 
 ---
 
 ## Status & Implementation Checklist
 
-- [x] Consortium Lead Investigator Dashboard with live metrics
-- [x] Federated Training Session Management & Round Progression
-- [x] Experiments & Hyperparameter Tuning Manager
-- [x] Hospital Node Registry & Quorum Tracking (8/8 Ring Nodes)
-- [x] Model Registry with Comparative Architectural Matrix & Radar Chart
-- [x] Security Center with Byzantine Vector Space 2D Projection & Privacy Budget Circular Gauge
-- [x] Cryptographic Merkle Root Ledger & Audit Log Payload Inspector
-- [x] Alert Center with Byzantine Fault Clamping
-- [x] Secure Dispatch & Kyoto Hospital Chat Communication Channel
-- [x] Investigator Profile & Consortium Governance Identity
-- [x] Settings with Hard-Locked Zero-Raw-Data Enclave Enforcement
-- [x] Interactive States Demo (Normal, Loading, Empty, Error, Offline)
-- [x] Halt Training Confirmation Modal with Egress Revocation
-- [x] Byzantine Node Quarantine Dialog with Cryptographic Exclusion
-- [x] Model Weights Export Modal with Differential Privacy Certificate
-- [x] Role Switch Modal (Lead FL Investigator ↔ Consortium Admin Tier-1)
-- [x] MedFL.Secure Hardware Attestation Login Screen (FIDO2 / YubiKey / SAML 2.0)
-- [x] Consortium Access Request Wizard (`SEC-792-REQ`)
-- [x] State Management Architecture (Zustand stores in `src/stores/`; demo data isolated in `src/mocks/`)
-- [x] Automated Module 1 Backend API Integration (`.env` configuration)
-- [x] Documentation & Production Verification Complete
+- [x] Sign-in for Admin and Researcher through Module 1 (no offline or demo login)
+- [x] Researcher access request (registers the account as pending)
+- [x] Admin: dashboard, researcher approvals, disease reports, hospitals, federation jobs and rounds, global models, stored models, update validation, users, audit log
+- [x] Researcher: dashboard, training requests, live monitoring, hospitals, profile and settings
+- [x] Federation job form: strategy, differential privacy and Module 12 security settings
+- [x] Live Flower panel: round progress, each hospital's step, start, stop and aggregate now
+- [x] Global model evaluation with progress, and promotion to MAIN
+- [x] State management with Zustand stores in `src/stores/`; demo data isolated in `src/mocks/`
+- [ ] Experiments screen (mock; Module 20)
+- [ ] Notifications and Messages screens (mock; Module 18)
+- [ ] Halt, Quarantine and Export dialogs (mock)
+- [ ] Per-hospital hardware telemetry (Module 13) and model export (Module 15)
 
 ---
 
 ## 1. Module Purpose & Core Architecture
 
-Module 2 is the primary orchestration desktop application for clinical researchers, principal investigators, and consortium administrators. It provides a central command center for managing federated medical imaging training rounds across distributed hospital nodes without ever centralizing or accessing raw patient data.
+Module 2 is the central application for the Admin and Researcher roles. Admins run federated training across hospitals; Researchers publish training requests and follow hospitals' local training. Neither role accesses raw patient data.
 
-### Cardinal Privacy Invariant
-> **ZERO-RAW-DATA ARCHITECTURAL ENFORCEMENT**  
-> Under no circumstances does raw medical imaging data (DICOM series, NIfTI volumes, EHR files) flow to or through Module 2. The central researcher workstation orchestrates training sessions, monitors differential privacy budgets ($\epsilon, \delta$), inspects gradient update distributions, and approves aggregated global models exclusively.
+### Privacy Rule
+> Raw medical images do not flow to or through Module 2. It shows metadata, aggregate training progress, update verdicts and global model evaluations only.
 
 ```text
                                +------------------------------------------+
-                               |     Module 2: Researcher Desktop         |
-                               | (React 19 + Vite + CSS Design System)    |
+                               |   Module 2: Admin and Researcher screens |
+                               |   (React + Vite, part of frontend/)      |
                                +--------------------+---------------------+
                                                     |
                          +--------------------------+--------------------------+
                          |                                                     |
                          v                                                     v
           +-----------------------------+                       +-----------------------------+
-          |  Lead Investigator Workflows|                       | Consortium Admin Operations |
+          |  Researcher                 |                       |  Admin                      |
           +-----------------------------+                       +-----------------------------+
-          | • Hyperparameter Config     |                       | • Node Quarantine / Ejection|
-          | • Quorum Monitoring         |                       | • User & Access Approval    |
-          | • Convergence Curves        |                       | • Byzantine Vector Clamp    |
-          | • Differential Privacy View |                       | • Cryptographic Merkle Audit|
-          | • Model Export & Packaging  |                       | • Global Key Revocation     |
+          | - Publish training requests |                       | - Approve users             |
+          | - Follow local progress     |                       | - Create and run jobs       |
+          | - View participating        |                       | - Approve hospital joins    |
+          |   hospitals                 |                       | - Evaluate, promote models  |
+          |                             |                       | - Update validation, audit  |
           +--------------+--------------+                       +--------------+--------------+
                          |                                                     |
                          +--------------------------+--------------------------+
                                                     |
                                                     v
                                +------------------------------------------+
-                               |   Backend & Security Infrastructure      |
-                               |  • Module 1: Auth & RBAC (/api/v1/auth)  |
-                               |  • Module 9: Flower FL Engine Orchestrator|
-                               |  • Module 12: Byzantine Defense Vector   |
-                               |  • Module 13/14: Telemetry & Merkle Logs |
+                               |   Backend (Node.js, REST + Socket.io)    |
+                               |  - Module 1: auth, roles, audit          |
+                               |  - Module 9: jobs, rounds, Flower server |
+                               |  - Modules 10, 12: DP and update checks  |
                                +------------------------------------------+
 ```
 
@@ -79,125 +68,102 @@ Module 2 is the primary orchestration desktop application for clinical researche
 
 | Functional Area | Handled by Module 2 | Related Modules |
 |---|:---:|:---:|
-| Federated round orchestration & start/pause/halt controls | ✅ | Module 9 (FL Engine) |
-| Differential privacy expenditure tracking ($\epsilon=1.24 / 1.50$) | ✅ | Module 10 (Differential Privacy) |
-| Byzantine node anomaly detection & 2D gradient projection | ✅ | Module 12 (Byzantine Defense) |
-| Hospital node quorum & telemetry monitoring (8 clinical nodes) | ✅ | Module 13 (Telemetry) |
-| Merkle root ledger & cryptographic audit record inspection | ✅ | Module 14 (Audit Storage) |
-| Comparative architectural matrix & 5-axis radar evaluation | ✅ | Module 6, 15 (Model Versioning) |
-| Consortium access request wizard (`SEC-792-REQ`) | ✅ | Module 1 (Auth & Approval) |
-| Secure inter-hospital dispatch & operator communication | ✅ | Module 18 (Communication) |
-| Enforcing strict client-side Zero-Raw-Data Lock | ✅ | All modules |
-| Raw image loading / local DICOM storage | ❌ *(Strictly prohibited)* | Handled strictly inside Module 3/4 |
-| Local model gradient computation | ❌ | Handled inside Module 7/9 |
+| Federation job setup, start, stop and aggregation controls | ✅ | Module 9 |
+| Differential privacy settings and per-job budget view | ✅ | Module 10 |
+| Module 12 settings, update verdicts and rejection reasons | ✅ | Module 12 |
+| Hospital list with request and round participation | ✅ | Modules 1, 9 |
+| Global model versions, evaluation and promotion | ✅ | Modules 9, 15 |
+| Researcher approval and user management | ✅ | Module 1 |
+| Audit log view | ✅ | Modules 1, 14 |
+| Per-hospital hardware telemetry | ❌ *(not implemented; the screen says so)* | Module 13 |
+| Messaging and Admin/Researcher notifications | ❌ *(mock)* | Module 18 |
+| Raw image loading | ❌ *(not allowed)* | Modules 3, 4 |
+| Local model training | ❌ | Modules 7, 9 |
 
 ---
 
 ## 3. Role-Based Access Control (RBAC) in Module 2
 
-Module 2 strictly honors the role models defined by Module 1:
+Module 2 follows the roles defined by Module 1:
 
 ```javascript
-ROLES.RESEARCHER = 'researcher'      // Lead FL Investigator
-ROLES.ADMIN      = 'admin'           // Consortium Admin Tier-1
+ROLES.RESEARCHER = 'researcher'
+ROLES.ADMIN      = 'admin'
 ```
+
+Hospital Operators are a third, separate role with their own screens (Module 3).
 
 ### Role Capabilities in Interface
 
-| Capability | Lead FL Investigator (`researcher`) | Consortium Admin Tier-1 (`admin`) |
+| Capability | Researcher | Admin |
 |---|:---:|:---:|
-| View Training Dashboard & Convergence Curves | ✅ | ✅ |
-| Configure Experiments & Hyperparameters | ✅ | ✅ |
-| Inspect Model Registry & Architectures | ✅ | ✅ |
-| View Hospital Node Status & Latency | ✅ | ✅ |
-| View Merkle Audit Trail | ✅ (Read-Only) | ✅ (Full Verification) |
-| Quarantine / Exclude Byzantine Hospital Node | ❌ *(Requires Admin Approval)* | ✅ *(Instant Exclusion)* |
-| Emergency Halt Consortium Training | ❌ *(Can Request Halt)* | ✅ *(Instant Global Halt)* |
-| Approve New Researcher Access Requests | ❌ | ✅ |
-| Export Global Model Weights Bundle | ✅ (DP-Attested) | ✅ (Signed by Enclave) |
+| Publish training requests and follow their progress live | ✅ | ❌ |
+| View hospitals | ✅ (request participation) | ✅ (also registry and round participation) |
+| Create and run federation jobs, approve hospital joins | ❌ | ✅ |
+| Evaluate and promote global models | ❌ | ✅ |
+| View update validation | ❌ | ✅ |
+| View audit logs | ❌ | ✅ |
+| Approve, reject or suspend users | ❌ | ✅ |
+| Export model weights | ❌ | ❌ (not implemented) |
 
 ---
 
 ## 4. Screen-by-Screen Architecture
 
-Module 2 contains 16 distinct operational screens and dialog suites:
-
-### 1. Consortium Dashboard (`DashboardView.jsx`)
-- **Federated Quorum Strip:** Real-time indicator of active participating clinical nodes (8/8 online, FedAvg v3.2, 100% quorum).
-- **Executive Metric Cards:** Active Experiments (4), Global Aggregation Rounds (42/50), Differential Privacy Budget Spent ($\epsilon=1.24$, 82.6%), Global Validation ROC-AUC (0.942).
-- **Convergence Curves:** Live multi-metric training progress charting loss decay and validation accuracy across rounds.
-- **Node Latency & Performance Stack Bar:** Inter-hospital synchronization times across Tokyo, Berlin, Boston, and Geneva nodes.
+### 1. Dashboard (`DashboardView.jsx`)
+- **Admin:** active hospitals, federation jobs, global models and training requests, from real data.
+- **Researcher:** own training requests, participating hospitals, hospitals training now and local training finished.
 
 ### 2. Federation Jobs & Rounds (`FederatedTrainingView.jsx`, admin)
-- Create a Module 9 job (task, architecture, class mapping, minimum participants), delete or archive jobs and rounds.
-- **Open round N**: deadline (required, in the future) and minimum participants. The round's base model is chosen by Module 9: the job's latest global model, or one shared freshly initialised seed (`SEED_<job_id>`) when the job has none yet. Hospitals download it (`GET /federation/rounds/:round_id/base-model/:file`) and verify its checksum before training. Only one round per job can be in progress.
-- Per-round participants (hospital name and id) and their accepted/rejected status.
-- **Aggregate Round** (also on the Admin Overview) opens a confirmation listing every hospital that joined the round, by name and id, with its update status; before the deadline it warns that the round closes early (`force_close`, Module 9 still requires the minimum accepted updates). It then shows the aggregation in progress and the result (new global model, round status, which hospitals were notified). Every active hospital that did not join the round gets a `ROUND_CLOSED` notification; opening a round sends `ROUND_OPEN` to every active hospital.
+- Create a Module 9 job (task, architecture, class mapping, minimum participants, round plan, strategy, DP and Module 12 settings), delete or archive jobs and rounds. Jobs appear under In progress, Completed and Archived.
+- Review hospital join requests with each hospital's local eligibility summary, then approve or reject them.
+- **Start federation** runs the job through one Flower server, with a live panel of round status and each hospital's step. **Stop** ends the server, and **Aggregate now** closes a round early once enough updates have been sent.
+- Manual rounds: **Open round N** takes a deadline (required, in the future) and minimum participants. Module 9 chooses the base model: the job's latest global model, or one shared freshly initialised seed (`SEED_<job_id>`) when the job has none yet. Hospitals download it (`GET /federation/rounds/:round_id/base-model/:file`) and verify its checksum before training. Only one round per job can be in progress.
+- Per-round participants (hospital name and id) and their update status, including FLAGGED and QUARANTINED badges, plus the DP budget panel for DP jobs.
+- **Aggregate Round** opens a confirmation listing every hospital that joined the round, by name and id, with its update status; before the deadline it warns that the round closes early (`force_close`, Module 9 still requires the minimum accepted updates). It then shows the aggregation in progress and the result. Every active hospital that did not join the round gets a `ROUND_CLOSED` notification; opening a round sends `ROUND_OPEN` to every active hospital.
 
-### 3. Experiments & Tuning (`ExperimentsView.jsx`)
-- Experiment registry tracking ID, modality (Pneumonia Chest X-Ray, Brain MRI), target architecture, client cohort, and convergence status.
-- Hyperparameter tuning drawer: learning rate, momentum, weight decay, local epochs, batch size, and clipping norm ($C=1.0$).
+### 3. Training Requests (`ResearcherTrainingView.jsx`, researcher)
+- Publish a training request (disease, task, description, architecture from the Module 6 list, epochs, batch size) and follow each hospital live through Socket.io room events.
+- A training request is separate from a federation job: it does not create one.
 
-### 4. Hospital Node Registry (`HospitalsView.jsx`)
-- Comprehensive card and tabular registry of all consortium hospital nodes (e.g., St. Jude Children's, Charité Berlin, Johns Hopkins, Kyoto University Hospital).
-- Node attestation status (Intel SGX2 FIPS Validated), compute tier, local sample counts, and round contribution history.
-- Contextual actions: Direct Dispatch Message, Telemetry Inspector, and Quarantine Trigger.
+### 4. Monitoring (`MonitoringView.jsx`, researcher)
+- Live per-hospital epoch, loss and accuracy for the researcher's open requests.
 
-### 5. Model Registry (`ModelsView.jsx`)
-- Catalog of consortium-approved architectures: ResNet-18, EfficientNet-B0, DenseNet-121, MobileNetV3-Large.
-- **Comparative Architectural Matrix:** Tabular comparison of parameter count, MACs/FLOPs, memory footprint, and convergence rates.
-- **5-Axis Radar Chart:** Multi-dimensional visualization rating Accuracy, Memory Efficiency, Throughput, Privacy Resilience, and Generalizability.
+### 5. Hospitals (`HospitalsView.jsx`)
+- Training-request participation for both roles. Admins also see the hospital registry and federation round participation.
 
-### 6. Security Center & Byzantine Defense (`SecurityView.jsx`)
-- **Byzantine Vector Space 2D Projection:** Dynamic scatter visualization projecting hospital gradient updates onto a 2-dimensional principal component plane, isolating malicious/outlier gradient vectors (e.g., Kyoto Hospital anomaly).
-- **Privacy Budget Circular Gauge:** SVG radial gauge visualizing cumulative differential privacy expenditure ($\epsilon=1.24 / 1.50$, $\delta=10^{-5}$) with safety color thresholds.
-- **Intrusion Defense & Tamper Log:** Real-time log of gradient clipping triggers, poisoned weight rejections, and TLS handshake anomalies.
+### 6. Global Models (`AdminFederationModelsView.jsx`, `ModelsView.jsx`, admin)
+- Module 9 global model versions with evaluations, stored-model records and the Module 6 architecture catalog.
+- Evaluate a version on the held-out set with live progress, and promote it to MAIN. These endpoints are admin-only, so researchers see a notice instead.
 
-### 7. Audit Logs & Merkle Inspector (`AuditLogsView.jsx`)
-- Cryptographic event ledger with SHA-256 state hashes and Merkle root checkpoints.
-- **Cryptographic Payload Inspector:** Embedded syntax-highlighted JSON viewer allowing researchers to inspect audit event signatures, public keys, and nonces.
+### 7. Researcher Approvals and Users (`AdminApprovalView.jsx`, `UserManagementView.jsx`, admin)
+- Approve or reject pending researchers, and approve, reject or suspend any account.
 
-### 8. Notifications & Alert Center (`NotificationsView.jsx`)
-- Multi-tier alert stream categorized by urgency (`CRITICAL`, `WARNING`, `INFO`).
-- Interactive Byzantine fault clamp actions and automated quorum warning dismissals.
+### 8. Disease Reports (`AdminDiseaseModelsView.jsx`, admin)
+- Model and training information per disease, from `/admin/diseases` and `/admin/reports`.
 
-### 9. Secure Messages & Dispatch (`MessagesView.jsx`)
-- End-to-end encrypted dispatch channels between consortium lead investigators and hospital clinical operators.
-- Hardware telemetry drawer embedded inside chat (showing remote node GPU temp, VRAM, and daemon health).
+### 9. Update Validation (`SecurityView.jsx`, admin)
+- Every hospital update with the server's verdict and rejection reason, with counts of accepted, rejected or quarantined, and expired or failed updates.
+- Its status list still calls Module 11 "Pending"; this text should be updated when Module 11 closes.
 
-### 10. Profile & Governance Identity (`ProfileView.jsx`)
-- Verified clinical investigator identity: Dr. Elena Rostova, M.D., Ph.D.
-- Affiliation credentials (Stanford Medicine AI Lab), ORCID, NPI, YubiKey 5C FIPS token ID, and Intel SGX enclave attestation fingerprints.
+### 10. Audit Logs (`AuditLogsView.jsx`, admin)
+- The Module 1 audit trail: logins, approvals, training-request participation and progress. Admin federation actions are not recorded yet.
 
-### 11. Settings & Platform Constraints (`SettingsView.jsx`)
-- Telemetry refresh intervals, theme configurations, and API endpoint overrides.
-- **Hard-Locked Zero-Raw-Data Toggle:** Permanently locked visual switch enforcing zero medical image ingress with explanatory policy text.
+### 11. Profile and Settings (`ProfileView.jsx`, `SettingsView.jsx`)
+- The signed-in account, password change and sign-out; researchers also see the requests they published.
 
-### 12. States & Dialogs Showcase (`StatesDemoView.jsx`)
-- Interactive tester allowing reviewers to instantly toggle global application states: `Normal`, `Loading Skeleton`, `Empty / No Data`, and `Error / Disconnected`.
+### 12. Sign-in and Access Request (`LoginView.jsx`, `AdminLoginView.jsx`, `RequestAccessView.jsx`)
+- Sign-in through Module 1. Researchers register through the access request form and stay pending until an Admin approves.
 
-### 13. Authentication & Enclave Login (`LoginView.jsx`)
-- Clinical single sign-on supporting SAML 2.0 / OIDC institutional providers (Stanford Medicine, Johns Hopkins, Charité).
-- Multi-factor hardware attestation selector: FIDO2 / YubiKey, TOTP Authenticator, and mTLS Certificate.
-
-### 14. Access Request Wizard (`RequestAccessView.jsx`)
-- Multi-step clinical consortium application form (`SEC-792-REQ`) collecting researcher credentials, institutional affiliations, research protocols, and data protection sign-offs.
+### 13. Mock Screens (`ExperimentsView.jsx`, `NotificationsView.jsx`, `MessagesView.jsx`, `StatesDemoView.jsx`)
+- Demo data with a "Mock data" banner, until Modules 18 and 20 provide real data.
 
 ---
 
-## 5. Security Dialogs & Interactive Modals
+## 5. Dialogs
 
-1. **Halt Training Modal (`HaltTrainingModal.jsx`):**
-   - Requires explicit typed confirmation (`HALT-CONSORTIUM`) to prevent accidental session interruptions.
-   - Automatically revokes hospital gradient ingress tokens and commits a high-priority Merkle audit log.
-2. **Byzantine Node Quarantine Modal (`QuarantineModal.jsx`):**
-   - Displays offending gradient divergence metric ($L_2$ distance $>3.8\sigma$).
-   - Cryptographically excludes the node from the current and upcoming aggregation rounds.
-3. **Export Weights Modal (`ExportWeightsModal.jsx`):**
-   - Previews model weight archive size, SHA-256 digest, and differential privacy certification ($\epsilon=1.24$).
-   - Exports weights in PyTorch (`.pt`), ONNX, or SafeTensors formats.
-4. **Switch Role Modal (`SwitchRoleModal.jsx`):**
-   - Seamlessly simulates role transitions between `researcher` and `admin` to verify RBAC UI behavior.
+1. **Aggregate Round (`components/federation/AggregateRoundDialog.jsx`):** real; see screen 2.
+2. **Halt Training, Quarantine and Export Weights (`components/modals/`):** mock with a banner. They do not halt training, quarantine a hospital or export weights. Module 12 quarantines an update automatically at intake, and no action exists to release it.
 
 ---
 
@@ -222,7 +188,7 @@ npm install
 npm run dev
 ```
 
-The application runs at **`http://localhost:5173`** (or next available port).
+The application runs at **`http://localhost:5173`** (or next available port), or at `https://localhost:5173` in TLS mode (`VITE_API_URL` is https and `certs/` exists).
 
 ### Environment Configuration
 The application reads its backend API endpoint from `.env`:
@@ -239,12 +205,12 @@ Sign-in requires the backend: there is no offline or demo login. If the backend 
 | Training (researcher) | researcher | `POST /training-requests`, `/training-requests/my`, live Socket.io room events |
 | Monitoring | researcher | own open requests' per-hospital epoch/loss/accuracy, live |
 | Hospitals | both | `/training-requests` participation; admins also `/admin/telemetry` and M9 rounds |
-| Federation Jobs & Rounds | admin | `/federation/jobs`, `POST /federation/jobs`, `POST /federation/rounds`, `POST /federation/rounds/aggregate` |
+| Federation Jobs & Rounds | admin | `/federation/jobs`, `POST /federation/jobs`, `POST /federation/rounds`, `POST /federation/rounds/aggregate`, `/federation/jobs/:id/flower/*`, participant decisions |
 | Global Models | admin | `/federation/models` (+ evaluations), `/admin/stored-models`, `/federation/architectures` |
 | Update Validation (Security) | admin | M9 job details: every submitted update and its rejection reason |
 | User Management | admin | `GET /admin/users`, `POST /admin/users/:id/{approve,reject,suspend}` |
 | Audit Log | admin | `GET /admin/audit-logs` |
 | Profile / Settings | both | `/auth/me`, `POST /auth/change-password` |
-| Experiments, Notifications, Messages, States demo | - | **Mock data** (Modules 18/20 not implemented), shown with a "Mock data" banner |
+| Experiments, Notifications, Messages, States demo | - | **Mock data** (Modules 18/20 not finished), shown with a "Mock data" banner |
 
-Hardware/GPU telemetry per hospital (Module 13), differential privacy (Module 10), Byzantine detection (Module 12) and model export (Module 15) are not implemented; the screens say so instead of showing figures.
+Hardware/GPU telemetry per hospital (Module 13) and model export (Module 15) are not implemented; the screens say so instead of showing figures. Differential privacy (Module 10) and Byzantine detection (Module 12) are implemented: the admin job form sets them, and the federation and Security screens show the results. The Quarantine and Export dialogs are still mock.
